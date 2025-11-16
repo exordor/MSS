@@ -74,6 +74,8 @@ CTestTestfile.cmake
 Makefile
 compile_commands.json
 
+ros1_ws/src/CMakeLists.txt
+
 ###############################################################################
 # CUDA / TensorRT / Jetson cache
 ###############################################################################
