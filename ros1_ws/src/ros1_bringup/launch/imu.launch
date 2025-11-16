@@ -1,0 +1,10 @@
+<launch>
+  <arg name="config_file" default="$(find ros1_bringup)/../../../config/imu/sbg.yaml" />
+
+  <node pkg="sbg_driver"
+        type="sbg_device"
+        name="imu"
+        output="screen">
+    <rosparam command="load" file="$(arg config_file)" />
+  </node>
+</launch>
