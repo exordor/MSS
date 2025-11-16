@@ -1,0 +1,11 @@
+<launch>
+  <!-- Path to the shared Navi LiDAR config -->
+  <arg name="config_file" default="$(find ros1_bringup)/../../../config/navi_lidar/qt128.yaml" />
+
+  <node pkg="hesai_ros_driver"
+        type="hesai_ros_driver_node"
+        name="navi_lidar"
+        output="screen">
+    <param name="config_path" value="$(arg config_file)" />
+  </node>
+</launch>
