@@ -11,9 +11,22 @@ This package hosts launch files that bring up each hardware component individual
 | `navi_lidar.launch` | Starts the Hesai Navi LiDAR driver with `config/navi_lidar/qt128.yaml`. |
 | `all_sensors.launch` | Includes the three launch files above with optional enable/disable switches, per-sensor overrides, and an optional rosbag recorder. |
 
+Helper scripts are available under `scripts/`:
+
+| Script | Description |
+|--------|-------------|
+| `scripts/run_camera.sh` | Sources ROS + workspace environment and launches `camera.launch`. |
+| `scripts/run_imu.sh` | Launches `imu.launch`. |
+| `scripts/run_lidar.sh` | Launches `navi_lidar.launch`. |
+| `scripts/run_all_sensors.sh` | Launches `all_sensors.launch` (defaults configurable via CLI args). |
+
 ### Starting every sensor at once
 
 ```bash
+# Option 1: helper script
+~/EAGRUMO/scripts/run_all_sensors.sh
+
+# Option 2: manual
 cd ~/EAGRUMO/ros1_ws
 source devel/setup.bash
 roslaunch ros1_bringup all_sensors.launch
