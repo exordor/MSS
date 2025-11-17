@@ -1,0 +1,71 @@
+# Preset for the Daheng MER2-302 camera used on the platform.
+# Parameters are loaded into the galaxy_camera node's private namespace.
+camera_name: galaxy_camera
+camera_frame_id: camera_link
+camera_info_url: ""
+output: screen
+image_width: 4096
+image_height: 3000
+image_offset_x: 0
+image_offset_y: 0
+pixel_format: bgr8
+camera_pixel_format: BayerRG8
+camera_ip: "192.168.0.11"
+frame_rate: 5.0
+processing_queue_depth: 4
+
+# Exposure / gain tuning
+exposure_auto: true
+exposure_min: 20.0
+exposure_max: 1000000.0
+exposure_value: 10000.0
+
+gain_auto: true
+gain_min: 0.0
+gain_max: 24.0
+gain_value: 15.0
+
+black_auto: true
+black_value: 2.0
+
+white_auto: true
+white_selector: 0
+white_value: 1.0
+
+# GigE transport tuning
+gev_packet_size: 8192
+gev_packet_delay_us: 10000
+gev_resend_timeout_ms: 50
+gev_packet_timeout_ms: 100
+gev_block_timeout_ms: 5000
+gev_socket_buffer_kb: 16384
+
+# Keep the ROS 2 variant of the preset for future reuse.
+ros2:
+  galaxy_camera:
+    ros__parameters:
+      serial_numbers:
+        - GBA25060301
+      camera_ip: "192.168.0.11"
+      pixel_format: "bgr8"
+      region:
+        x: 0
+        y: 0
+        width: 4096
+        height: 3000
+      auto_exposure: true
+      exposure_time_us: 10000
+      exposure_min_us: 20
+      exposure_max_us: 1000000
+      auto_gain: true
+      gain_db: 15.0
+      gain_min_db: 0.0
+      gain_max_db: 24.0
+      white_balance_auto: true
+      frame_rate_hz: 5.0
+      gev_packet_size: 8192
+      gev_packet_delay_us: 10000
+      gev_resend_timeout_ms: 50
+      gev_packet_timeout_ms: 100
+      gev_block_timeout_ms: 5000
+      gev_socket_buffer_kb: 16384
