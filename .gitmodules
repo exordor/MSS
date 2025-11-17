@@ -7,3 +7,6 @@
 [submodule "ros1_ws/src/imu"]
 	path = ros1_ws/src/imu
 	url = https://github.com/exordor/imu_driver.git
+[submodule "ros1_ws/src/slam/fast_livo2"]
+	path = ros1_ws/src/slam/fast_livo2
+	url = https://github.com/hku-mars/FAST-LIVO2.git
