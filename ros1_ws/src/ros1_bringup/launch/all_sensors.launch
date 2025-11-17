@@ -1,59 +1,51 @@
+<?xml version="1.0"?>
 <launch>
-  <!-- Toggles to enable/disable individual sensors -->
-  <arg name="bringup_camera" default="true" />
-  <arg name="bringup_imu" default="true" />
-  <arg name="bringup_lidar" default="true" />
+    <!-- Enable / disable rosbag -->
+    <arg name="record" default="true" />
+    <arg name="bag_dir" default="$(find ros1_bringup)/../../../temp" />
+    <arg name="bag_name" default="all_sensors" />
 
-  <arg name="rosbag_config_file" default="$(find ros1_bringup)/../../../config/rosbag/all_sensors.yaml" />
-  <arg name="rosbag_topics" default="$(eval ' '.join(load_yaml(arg('rosbag_config_file'))['topics']))" />
-  <arg name="rosbag_default_enabled" default="$(eval load_yaml(arg('rosbag_config_file'))['record']['enabled'])" />
-  <arg name="rosbag_default_name" default="$(eval load_yaml(arg('rosbag_config_file'))['record']['bag_name'])" />
-  <arg name="rosbag_default_output" default="$(eval load_yaml(arg('rosbag_config_file'))['record']['output_dir'])" />
-  <arg name="rosbag_timestamp" default="$(eval time.strftime('%Y%m%d_%H%M%S'))" />
+    <!-- Bringup: Camera -->
+    <group>
+        <include file="$(find ros1_bringup)/launch/camera.launch" />
+    </group>
 
-  <arg name="record_rosbag" default="$(arg rosbag_default_enabled)" />
-  <arg name="rosbag_output" default="$(arg rosbag_default_output)" />
-  <arg name="rosbag_name" default="$(arg rosbag_default_name)" />
+    <!-- Bringup: IMU -->
+    <group>
+        <include file="$(find ros1_bringup)/launch/imu.launch" />
+    </group>
 
-  <!-- Camera options -->
-  <arg name="camera_config_file" default="$(find ros1_bringup)/../../../config/camera/auto.yaml" />
-  <arg name="camera_node_name" default="galaxy_camera" />
-  <arg name="camera_output" default="screen" />
-  <arg name="camera_respawn" default="false" />
+    <!-- Bringup: LiDAR -->
+    <group>
+        <include file="$(find ros1_bringup)/launch/navi_lidar.launch" />
+    </group>
 
-  <!-- IMU options -->
-  <arg name="imu_config_file" default="$(find ros1_bringup)/../../../config/imu/sbg.yaml" />
-
-  <!-- LiDAR options -->
-  <arg name="lidar_config_file" default="$(find ros1_bringup)/../../../config/navi_lidar/qt128.yaml" />
-
-  <group if="$(arg bringup_camera)">
-    <include file="$(find ros1_bringup)/launch/camera.launch">
-      <arg name="config_file" value="$(arg camera_config_file)" />
-      <arg name="node_name" value="$(arg camera_node_name)" />
-      <arg name="output" value="$(arg camera_output)" />
-      <arg name="respawn" value="$(arg camera_respawn)" />
-    </include>
-  </group>
-
-  <group if="$(arg bringup_imu)">
-    <include file="$(find ros1_bringup)/launch/imu.launch">
-      <arg name="config_file" value="$(arg imu_config_file)" />
-    </include>
-  </group>
-
-  <group if="$(arg bringup_lidar)">
-    <include file="$(find ros1_bringup)/launch/navi_lidar.launch">
-      <arg name="config_file" value="$(arg lidar_config_file)" />
-    </include>
-  </group>
-
-  <group if="$(arg record_rosbag)">
-    <node pkg="rosbag"
-          type="record"
-          name="all_sensors_rosbag_record"
-          args="-O $(arg rosbag_output)/$(arg rosbag_name)_$(arg rosbag_timestamp) $(arg rosbag_topics)"
-          output="screen"
-          launch-prefix="bash -c 'mkdir -p $(arg rosbag_output); exec '" />
-  </group>
+    <!-- Rosbag Recording -->
+    <group if="$(arg record)">
+      <node pkg="rosbag" type="record" name="rosbag_record" output="screen"
+          args="record -o $(arg bag_dir)/$(arg bag_name)
+                /navi_lidar/points
+                /galaxy_camera/image_raw
+                /galaxy_camera/camera_info
+                /galaxy_camera/image_raw/compressed
+                /imu/data
+                /imu/mag
+                /imu/nav_sat_fix
+                /imu/pos_ecef
+                /imu/pres
+                /imu/temp
+                /imu/utc_ref
+                /imu/velocity
+                /sbg/air_data
+                /sbg/ekf_euler
+                /sbg/ekf_nav
+                /sbg/ekf_quat
+                /sbg/gps_pos
+                /sbg/gps_vel
+                /sbg/imu_data
+                /sbg/imu_short
+                /sbg/mag
+                /sbg/status
+                /sbg/utc_time" />
+    </group>
 </launch>
