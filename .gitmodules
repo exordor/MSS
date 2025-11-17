@@ -10,3 +10,6 @@
 [submodule "ros1_ws/src/slam/fast_livo2"]
 	path = ros1_ws/src/slam/fast_livo2
 	url = https://github.com/hku-mars/FAST-LIVO2.git
+[submodule "ros1_ws/src/slam/vikit"]
+	path = ros1_ws/src/slam/vikit
+	url = https://github.com/xuankuzcr/rpg_vikit.git
