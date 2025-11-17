@@ -19,6 +19,8 @@ Helper scripts are available under `scripts/`:
 | `scripts/run_imu.sh` | Launches `imu.launch`. |
 | `scripts/run_lidar.sh` | Launches `navi_lidar.launch`. |
 | `scripts/run_all_sensors.sh` | Launches `all_sensors.launch` (defaults configurable via CLI args). |
+| `scripts/run_all_sensors_record.sh` | Wraps `run_all_sensors.sh` and forces `record:=true` while still accepting extra CLI overrides. |
+| `scripts/run_all_sensors_no_record.sh` | Same as above but forces `record:=false` for quick sensor bringup without rosbagging. |
 
 ### Starting every sensor at once
 
