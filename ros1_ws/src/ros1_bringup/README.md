@@ -32,7 +32,20 @@ source devel/setup.bash
 roslaunch ros1_bringup all_sensors.launch
 ```
 
-You can disable individual sensors or override their configs via arguments, e.g.:
+`all_sensors.launch` exposes a few convenience arguments:
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `bringup_camera`, `bringup_imu`, `bringup_lidar` | `true` | Quickly toggle each sensor stack. |
+| `camera_config_file`, `imu_config_file`, `lidar_config_file` | package defaults | Point to alternate YAML files under `config/`. |
+| `camera_launch_file`, `imu_launch_file`, `lidar_launch_file` | package defaults | Swap in a different launch file if needed. |
+| `camera_node_name`, `camera_output`, `camera_respawn` | `galaxy_camera`, `screen`, `false` | Handy passthroughs to the Galaxy driver launch file. |
+| `record` | `false` | Enables rosbag recording when set to `true`. |
+| `bag_dir`, `bag_name` | `~/EAGRUMO/temp`, `all_sensors` | Output location and base bag name. |
+| `rosbag_topics` | (pre-filled list) | Whitespace-separated list of topics to record. Override entirely to customize. |
+| `rosbag_extra_args` | `--lz4` | Additional flags forwarded to `rosbag record` (e.g., `--split --size=4096`). |
+
+Disable individual sensors or override their configs via arguments, e.g.:
 
 ```bash
 roslaunch ros1_bringup all_sensors.launch bringup_lidar:=false camera_config_file:=/tmp/cam.yaml
@@ -40,12 +53,17 @@ roslaunch ros1_bringup all_sensors.launch bringup_lidar:=false camera_config_fil
 
 ### Recording all topics
 
-`all_sensors.launch` can start a rosbag recorder that captures the topics listed in `config/rosbag/all_sensors.yaml`:
+`all_sensors.launch` no longer depends on an external YAML file for rosbag topics—the default list lives directly inside the launch file so it always ships with the bringup package. Override `rosbag_topics` if you need a different set:
 
 ```bash
-roslaunch ros1_bringup all_sensors.launch record_rosbag:=true rosbag_name:=test_run
+roslaunch ros1_bringup all_sensors.launch record:=true bag_name:=test_run \
+	rosbag_topics:="/navi_lidar/points /sbg/ekf_nav"
 ```
+`rosbag_extra_args` is handy for compression or splitting:
 
-Use `rosbag_config_file` to point to a different YAML file. The YAML now also stores default values under the `record` key (`enabled`, `bag_name`, `output_dir`), so you can change the defaults without editing the launch file. Override any of them at runtime with `record_rosbag`, `rosbag_name`, or `rosbag_output`. The YAML must define a `topics` array—edit it to add or remove streams you care about.
+```bash
+roslaunch ros1_bringup all_sensors.launch record:=true \
+	rosbag_extra_args:="--lz4 --split --duration=600"
+```
 
 Refer to the launch file for the complete list of arguments (camera output mode, respawn policy, etc.).
