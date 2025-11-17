@@ -4,3 +4,6 @@
 [submodule "ros1_ws/src/camera"]
 	path = ros1_ws/src/camera
 	url = https://github.com/exordor/galaxy_camera_ros_driver.git
+[submodule "ros1_ws/src/imu"]
+	path = ros1_ws/src/imu
+	url = https://github.com/exordor/imu_driver.git
