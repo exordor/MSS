@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-WS_DIR="${SCRIPT_DIR}/../ros1_ws"
+REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../.." && pwd)
+WS_DIR="${REPO_ROOT}/ros1_ws"
 
 set +u
 source /opt/ros/${ROS_DISTRO:-noetic}/setup.bash
