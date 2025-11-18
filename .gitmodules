@@ -13,3 +13,6 @@
 [submodule "ros1_ws/src/slam/vikit"]
 	path = ros1_ws/src/slam/vikit
 	url = https://github.com/xuankuzcr/rpg_vikit.git
+[submodule "ros2_ws/src/navi_lidar"]
+	path = ros2_ws/src/navi_lidar
+	url = https://github.com/HesaiTechnology/HesaiLidar_ROS_2.0.git
