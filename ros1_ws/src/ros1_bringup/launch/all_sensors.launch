@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <launch>
     <!-- Enable / disable rosbag -->
-    <arg name="record" default="true" />
+    <arg name="record" default="false" />
     <arg name="bag_dir" default="$(find ros1_bringup)/../../../temp" />
     <arg name="bag_name" default="all_sensors" />
 
