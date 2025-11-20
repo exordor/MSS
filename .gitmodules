@@ -16,3 +16,6 @@
 [submodule "ros2_ws/src/navi_lidar"]
 	path = ros2_ws/src/navi_lidar
 	url = https://github.com/exordor/HesaiLidar_ROS_2.0.git
+[submodule "ros2_ws/src/camera"]
+	path = ros2_ws/src/camera
+	url = https://github.com/exordor/galaxy_camera_ros_driver.git
