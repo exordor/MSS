@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.0.2)
+project(ros1_bringup)
+
+find_package(catkin REQUIRED)
+
+catkin_package()
+
+install(
+  DIRECTORY launch
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+  FILES_MATCHING PATTERN "*.launch"
+)
+
+install(
+  PROGRAMS scripts/camera_ros2_bridge.sh
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)

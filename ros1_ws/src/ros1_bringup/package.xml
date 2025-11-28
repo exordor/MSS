@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>ros1_bringup</name>
+  <version>0.1.0</version>
+  <description>ROS1 bringup launch files for Navi sensors.</description>
+  <maintainer email="dev@eagrumo.local">EAGRUMO</maintainer>
+  <license>BSD</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <exec_depend>roslaunch</exec_depend>
+  <exec_depend>hesai_ros_driver</exec_depend>
+  <exec_depend>galaxy_camera</exec_depend>
+
+  <export>
+    <build_type>catkin</build_type>
+  </export>
+</package>

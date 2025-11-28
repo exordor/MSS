@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>ros2_bringup</name>
+  <version>0.0.1</version>
+  <description>Bringup launch files for Navi LiDAR and related ROS 2 nodes.</description>
+  <maintainer email="jiale.wang@tu-clausthal.de">jiale</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>hesai_ros_driver</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

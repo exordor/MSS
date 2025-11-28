@@ -1,0 +1,7 @@
+thruster_node:
+  ros__parameters:
+    port: "/dev/serial/by-id/usb-Arduino_UNO_WiFi_R4_CMSIS-DAP_64E8335D6BF8-if01"
+    baud: 115200
+    read_interval: 0.05
+    stop_cmd: "C 1500 1500"
+    status_frame_id: "thruster_link"

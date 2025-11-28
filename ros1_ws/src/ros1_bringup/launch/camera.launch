@@ -1,0 +1,15 @@
+<launch>
+  <!-- Launches the Daheng galaxy_camera node using the shared bringup config -->
+  <arg name="config_file" default="$(find ros1_bringup)/../../../config/camera/auto.yaml" />
+  <arg name="node_name" default="galaxy_camera" />
+  <arg name="output" default="screen" />
+  <arg name="respawn" default="false" />
+
+  <node pkg="galaxy_camera"
+        type="galaxy_camera"
+        name="$(arg node_name)"
+        output="$(arg output)"
+        respawn="$(arg respawn)">
+    <rosparam command="load" file="$(arg config_file)" />
+  </node>
+</launch>

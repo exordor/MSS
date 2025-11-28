@@ -1,0 +1,32 @@
+# rosbag2 configuration for the all.launch.py bringup
+# This configuration records all relevant topics for the vehicle
+# Adjust the topics as necessary for your specific use case
+topics:
+  - /navi_lidar/points
+  - /camera_info
+  - /image_raw
+  - /image_raw/compressed
+  - /imu/data
+  - /imu/mag
+  - /imu/nav_sat_fix
+  - /imu/pos_ecef
+  - /imu/pres
+  - /imu/temp
+  - /imu/utc_ref
+  - /imu/velocity
+  - /sbg/air_data
+  - /sbg/ekf_euler
+  - /sbg/ekf_nav
+  - /sbg/ekf_quat
+  - /sbg/gps_hdt
+  - /sbg/gps_pos
+  - /sbg/gps_raw
+  - /sbg/gps_vel
+  - /sbg/imu_data
+  - /sbg/imu_short
+  - /sbg/mag
+  - /sbg/status
+  - /sbg/utc_time
+  - /thruster_status_pwm
+  - /thruster_command_pwm
+output: ros2_bringup_all
