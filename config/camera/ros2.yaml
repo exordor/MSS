@@ -1,0 +1,43 @@
+galaxy_camera:
+  ros__parameters:
+    camera_ip: "192.168.0.11"
+    camera_frame_id: "camera"
+    camera_name: "galaxy_camera"
+    camera_info_url: ""
+
+    image_width: 4096
+    image_height: 3000
+    image_offset_x: 0
+    image_offset_y: 0
+    pixel_format: "bgr8"
+    camera_pixel_format: "BayerRG8"
+
+    frame_rate: 5.0
+    processing_queue_depth: 8
+
+    # Exposure / gain / white balance
+    exposure_auto: true
+    exposure_min: 20.0
+    exposure_max: 1000000.0
+    exposure_value: 50000.0
+    gain_auto: true
+    gain_min: 0.0
+    gain_max: 24.0
+    gain_value: 0.0
+    white_auto: true
+    white_selector: 0
+    white_value: 1.0
+
+    # Networking / GigE Vision
+    gev_packet_size: 8192
+    GevSCPD: 8000
+    gev_resend_timeout_ms: 50
+    gev_packet_timeout_ms: 100
+    block_timeout_ms: 200
+    gev_socket_buffer_kb: 16384
+
+    # Timestamping
+    use_camera_timestamp: true
+    ptp_enable: true
+    dump_features_after_config: true
+    feature_dump_path: "temp/features_after_config.txt"
