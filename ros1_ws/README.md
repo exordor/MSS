@@ -4,6 +4,8 @@ This workspace bundles all ROS 1 drivers and launch files required to bring up
 EAGRUMO's navigation sensor stack.  The tree lives under `ros1_ws/` and follows
 the standard catkin layout (`src`, `build`, `devel`, `install`).
 
+> Tip: To automate everything in this document (git submodules, dependency install, and `catkin_make`), run `./scripts/first_run.sh` from the repo root. It keeps the repo on `main` while ensuring `src/slam/fast_livo2` is checked out to its `jetson-support` branch, and it accepts `--branch` / `--submodule-branch` overrides when needed.
+
 ## Packages
 
 | Package | Location | Purpose |
@@ -37,7 +39,7 @@ The SLAM package rides on a few dependencies that are not part of `ros-noetic-de
 
 	This removes the need for manual exports, but remember to drop or conditionalize the line if you build on x86 hosts where PCL lives elsewhere.
 
-- **Jetson support branch** – The `jetson-support` Git branch tracks the PCL fix *and* the patched Sophus copy so you can `git checkout jetson-support` on embedded targets while keeping `main` pristine for cross-platform development. Keep it rebased on the latest `main`, and cherry-pick only the portable commits back into `main` when upstreaming changes.
+- **Jetson support branch** – Inside `src/slam/fast_livo2` there is a dedicated `jetson-support` branch that tracks the PCL fix *and* the patched Sophus copy so you can run on embedded targets while the rest of the workspace stays on `main`. Keep it rebased on the latest `main`, and cherry-pick only the portable commits back into `main` when upstreaming changes.
 
 ## Build Instructions
 
@@ -74,3 +76,16 @@ The SLAM package rides on a few dependencies that are not part of `ros-noetic-de
 
 After building, you can inspect topics such as `/navi_lidar/ptp` or
 `/sbg/imu_data` using `rostopic list` / `rostopic echo` to verify sensor data.
+
+## Temporarily skipping SLAM
+
+If you need a lighter build (for example, to iterate on drivers only), you can keep the repository layout untouched and simply drop a `CATKIN_IGNORE` file inside the SLAM folder:
+
+```bash
+touch ros1_ws/src/slam/CATKIN_IGNORE
+catkin_make
+```
+
+- Catkin will skip **all** packages under `src/slam` while still building the rest of the workspace.
+- Submodules remain intact and team members can adopt the same toggle without extra tooling.
+- To re-enable FAST-LIVO2 (or other SLAM packages) later, just delete the file: `rm ros1_ws/src/slam/CATKIN_IGNORE` and rebuild.
