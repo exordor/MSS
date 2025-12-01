@@ -67,3 +67,54 @@ ros2 bag info temp/rosbag2_<TIMESTAMP>
 
 **SLAM status**
 - ROS2 SLAM support in this repository is not yet ready. See the project TODO for next steps (evaluation of Fast-LIVO2 / MOLA, dependency list, and example launches).
+
+## Gazebo Simulation
+
+VRX (Virtual RobotX) simulation environment for testing WAM-V systems with ROS 2 Jazzy + Gazebo Harmonic.
+
+**Quick start:**
+
+```bash
+cd gazebo
+colcon build --merge-install
+source install/setup.bash
+```
+
+**Features:**
+- WAM-V generation from YAML (components, sensors, thrusters)
+- Marine environment (waves, buoyancy, multiple world scenarios)
+- RGL LiDAR plugin, auto-recording, gamepad teleop
+
+**See also:** `gazebo/README.md` for detailed usage.
+
+## Development Guidelines
+
+**Branch workflow:**
+- Always create a new branch for development work — do not commit directly to `main`
+- Use descriptive branch names (e.g., `feature/new-sensor`, `fix/imu-calibration`)
+
+**Working with submodules:**
+
+This repository uses git submodules for package management. When developing code inside a submodule:
+
+1. Navigate to the submodule directory (e.g., `ros2_ws/src/camera/`)
+2. Create and checkout a development branch in the submodule repository:
+   ```bash
+   cd ros2_ws/src/camera
+   git checkout -b feature/my-camera-update
+   ```
+3. Make your changes and commit within the submodule
+4. Push the submodule branch to its remote repository
+5. Return to the main repository root and commit the submodule reference update:
+   ```bash
+   cd /path/to/mss_lecture
+   git add ros2_ws/src/camera
+   git commit -m "Update camera submodule to feature branch"
+   ```
+
+**Important:** Each submodule is an independent git repository. Branch changes must be made in both the submodule repository and tracked in the parent repository.
+
+**AI-assisted development:**
+- Use AI tools (GitHub Copilot, ChatGPT, Claude, etc.) to accelerate development
+- Ask AI for code reviews, debugging help, and implementation suggestions
+- Leverage AI for documentation, test generation, and refactoring tasks
