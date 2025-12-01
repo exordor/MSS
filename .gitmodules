@@ -20,6 +20,6 @@
 	path = ros2_ws/src/camera
 	url = https://github.com/exordor/galaxy_camera_ros_driver.git
 	branch = ros2-dev
-[submodule "gazebo"]
-	path = gazebo
+[submodule "gazebo/src"]
+	path = gazebo/src
 	url = https://github.com/exordor/vrx_tunnel.git
