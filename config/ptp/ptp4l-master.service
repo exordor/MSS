@@ -1,0 +1,13 @@
+[Unit]
+Description=PTP Master Clock (ptp4l)
+After=network.target
+Before=phc2sys.service
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/ptp4l -i eno1 -m -f /home/eagrumo/mss_lecture/config/ptp/ptp_master.conf
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
