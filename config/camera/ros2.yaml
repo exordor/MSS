@@ -41,3 +41,10 @@ galaxy_camera:
     ptp_enable: true
     dump_features_after_config: true
     feature_dump_path: "temp/features_after_config.txt"
+
+    # Image Compression
+    # image_transport will automatically create image_raw/compressed topic
+    # Custom compression creates a separate topic with additional processing
+    enable_custom_compression: true
+    custom_jpeg_quality: 50
+    custom_crop_top_pixels: 100
