@@ -27,7 +27,16 @@ rosidl_target_interfaces(thruster_node
 	${PROJECT_NAME}
 	"rosidl_typesupport_cpp")
 
-install(TARGETS thruster_node
+add_executable(thruster_wifi_node src/thruster_wifi_node.cpp)
+ament_target_dependencies(thruster_wifi_node rclcpp std_msgs)
+
+rosidl_target_interfaces(thruster_wifi_node
+	${PROJECT_NAME}
+	"rosidl_typesupport_cpp")
+
+install(TARGETS
+	thruster_node
+	thruster_wifi_node
 	DESTINATION lib/${PROJECT_NAME})
 
 ament_export_dependencies(rosidl_default_runtime)

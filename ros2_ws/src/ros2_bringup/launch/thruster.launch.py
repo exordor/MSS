@@ -11,15 +11,15 @@ def generate_launch_description():
         default_value=PathJoinSubstitution([
             FindPackageShare('ros2_bringup'),
             'config',
-            'thruster.yaml',
+            'thruster_wifi.yaml',
         ]),
         description='Absolute path to the thruster control YAML configuration file.'
     )
 
     thruster_node = Node(
         package='thruster_control',
-        executable='thruster_node',
-        name='thruster_node',
+        executable='thruster_wifi_node',
+        name='thruster_wifi_node',
         output='screen',
         parameters=[LaunchConfiguration('config_file')],
     )

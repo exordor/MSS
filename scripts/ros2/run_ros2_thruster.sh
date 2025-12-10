@@ -4,11 +4,11 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../.." && pwd)
 WS_DIR="${REPO_ROOT}/ros2_ws"
-DEFAULT_CONFIG="${REPO_ROOT}/config/thruster/thruster.yaml"
+DEFAULT_CONFIG="${REPO_ROOT}/config/thruster/thruster_wifi.yaml"
 
 usage() {
   cat <<'USAGE'
-Usage: ./run_ros2_thruster.sh [--config /path/to/thruster.yaml] [extra ros2 launch args]
+Usage: ./run_ros2_thruster.sh [--config /path/to/thruster_wifi.yaml] [extra ros2 launch args]
 
 Options:
   --config PATH   Override the default thruster YAML passed to the launch file.

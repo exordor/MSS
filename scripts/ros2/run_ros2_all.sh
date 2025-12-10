@@ -8,7 +8,7 @@ WS_DIR="${REPO_ROOT}/ros2_ws"
 DEFAULT_LIDAR_CONFIG="${REPO_ROOT}/config/navi_lidar/qt128.yaml"
 DEFAULT_CAMERA_CONFIG="${REPO_ROOT}/config/camera/ros2.yaml"
 DEFAULT_IMU_CONFIG="${REPO_ROOT}/config/imu/sbg_ros2.yaml"
-DEFAULT_THRUSTER_CONFIG="${REPO_ROOT}/config/thruster/thruster.yaml"
+DEFAULT_THRUSTER_CONFIG="${REPO_ROOT}/config/thruster/thruster_wifi.yaml"
 DEFAULT_BAG_CONFIG="${REPO_ROOT}/config/rosbag/rosbag_ros2.yaml"
 
 usage() {
@@ -19,7 +19,7 @@ Options:
   --lidar-config PATH     Override Navi LiDAR config (default: config/navi_lidar/qt128.yaml)
   --camera-config PATH    Override camera config (default: config/camera/ros2.yaml)
   --imu-config PATH       Override IMU config (default: config/imu/sbg_ros2.yaml)
-  --thruster-config PATH  Override thruster config (default: config/thruster/thruster.yaml)
+  --thruster-config PATH  Override thruster config (default: config/thruster/thruster_wifi.yaml)
   --bag-config PATH       Override rosbag topics/output YAML (default: config/rosbag/rosbag_ros2.yaml)
   --record-bag            Enable rosbag recording (default: disabled)
   --record-topics "LIST"  Space-separated topics to record (overrides bag config topics)
@@ -107,4 +107,6 @@ if [[ -n "$BAG_OUTPUT" ]]; then
 fi
 
 cd "${WS_DIR}"
+ros2 run sensor_compressor sensor_compressor &
+ros2 run remote_recorder recorder_node &
 ros2 launch ros2_bringup all.launch.py "${LAUNCH_ARGS[@]}" "${EXTRA_ARGS[@]}"

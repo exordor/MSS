@@ -1,0 +1,11 @@
+thruster_wifi_node:
+  ros__parameters:
+    host: "192.168.50.100"
+    port: 8888
+    connect_timeout: 5.0
+    read_interval: 0.05
+    reconnect_delay: 2.0
+    max_reconnect_delay: 60.0  # Maximum delay between reconnection attempts
+    stop_cmd: "C 1500 1500"
+    status_frame_id: "thruster_link"
+    handshake: "HELLO"
