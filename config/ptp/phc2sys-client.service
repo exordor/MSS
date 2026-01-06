@@ -1,0 +1,14 @@
+[Unit]
+Description=PHC to System Clock Sync (phc2sys)
+Wants=ptp4l-client.service network-online.target
+After=ptp4l-client.service network-online.target
+
+[Service]
+Type=simple
+# Sync system clock (CLOCK_REALTIME) from NIC PHC (/dev/ptp0)
+ExecStart=/usr/sbin/phc2sys -s /dev/ptp0 -c CLOCK_REALTIME -w -m -O 0
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
