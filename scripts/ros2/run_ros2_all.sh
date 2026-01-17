@@ -106,7 +106,11 @@ if [[ -n "$BAG_OUTPUT" ]]; then
   LAUNCH_ARGS+=("bag_output:=${BAG_OUTPUT}")
 fi
 
-cd "${WS_DIR}"
+# For relative paths in config files (e.g., camera_info_url), ensure we're in the correct directory
+# Use camera config's directory as working directory since it contains the calibration file
+CAMERA_CONFIG_DIR=$(dirname "${CAMERA_CONFIG}")
+cd "${CAMERA_CONFIG_DIR}"
+
 ros2 run sensor_compressor sensor_compressor &
 ros2 run remote_recorder recorder_node &
 ros2 launch ros2_bringup all.launch.py "${LAUNCH_ARGS[@]}" "${EXTRA_ARGS[@]}"

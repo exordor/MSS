@@ -57,7 +57,10 @@ else
 fi
 set -u
 
-cd "${WS_DIR}"
+# Change to the directory containing the config file for relative paths
+CONFIG_DIR=$(dirname "${CONFIG_PATH}")
+cd "${CONFIG_DIR}"
+
 if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
   ros2 launch ros2_bringup camera.launch.py "config_file:=${CONFIG_PATH}" "${EXTRA_ARGS[@]}"
 else
