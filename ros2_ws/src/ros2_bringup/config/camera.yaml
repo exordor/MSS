@@ -3,7 +3,7 @@ galaxy_camera:
     camera_ip: "192.168.0.11"
     camera_frame_id: "camera"
     camera_name: "galaxy_camera"
-    camera_info_url: ""
+    camera_info_url: "package://galaxy_camera/config/camera_calibration.yaml"
 
     image_width: 4096
     image_height: 3000
