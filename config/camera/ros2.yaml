@@ -3,7 +3,7 @@ galaxy_camera:
     camera_ip: "192.168.0.11"
     camera_frame_id: "camera"
     camera_name: "galaxy_camera"
-    camera_info_url: "file:///home/eagrumo/mss_lecture/ros2_ws/src/camera/config/camera_calibration.yaml"
+    camera_info_url: "file:///home/eagrumo/mss_lecture/config/camera/camera_calibration.yaml"
 
     image_width: 4096
     image_height: 3000
@@ -13,7 +13,7 @@ galaxy_camera:
     camera_pixel_format: "BayerRG8"
 
     frame_rate: 2.0
-    processing_queue_depth: 8
+    processing_queue_depth: 16
 
     # Exposure / gain / white balance
     exposure_auto: false
