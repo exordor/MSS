@@ -312,7 +312,7 @@
       # Air data
       log_air_data: 8
       # Short IMU data
-      log_imu_short: 8
+      log_imu_short: 0
 
     rtcm:
       # Should ros driver subscribe to RTCM topic
