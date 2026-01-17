@@ -3,7 +3,7 @@ galaxy_camera:
     camera_ip: "192.168.0.11"
     camera_frame_id: "camera"
     camera_name: "galaxy_camera"
-    camera_info_url: ""
+    camera_info_url: "file:///home/eagrumo/mss_lecture/ros2_ws/src/camera/config/camera_calibration.yaml"
 
     image_width: 4096
     image_height: 3000
@@ -12,18 +12,18 @@ galaxy_camera:
     pixel_format: "bgr8"
     camera_pixel_format: "BayerRG8"
 
-    frame_rate: 5.0
+    frame_rate: 2.0
     processing_queue_depth: 8
 
     # Exposure / gain / white balance
-    exposure_auto: true
+    exposure_auto: false
     exposure_min: 20.0
-    exposure_max: 1000000.0
-    exposure_value: 50000.0
-    gain_auto: true
-    gain_min: 0.0
+    exposure_max: 5000.0
+    exposure_value: 4000.0
+    gain_auto: false
+    gain_min: 5.0
     gain_max: 24.0
-    gain_value: 0.0
+    gain_value: 15.0
     white_auto: true
     white_selector: 0
     white_value: 1.0
@@ -45,6 +45,6 @@ galaxy_camera:
     # Image Compression
     # image_transport will automatically create image_raw/compressed topic
     # Custom compression creates a separate topic with additional processing
-    enable_custom_compression: true
+    enable_custom_compression: false
     custom_jpeg_quality: 50
     custom_crop_top_pixels: 100

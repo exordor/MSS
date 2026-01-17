@@ -15,7 +15,7 @@ frame_rate: 5.0
 processing_queue_depth: 4
 
 # Exposure / gain tuning
-exposure_auto: true
+exposure_auto: false
 exposure_min: 20.0
 exposure_max: 1000000.0
 exposure_value: 10000.0
