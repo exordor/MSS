@@ -215,6 +215,40 @@ public:
     return read_any;
   }
 
+  // Check if connection is still valid by attempting a non-blocking read
+  // Returns false if connection is broken or closed
+  bool checkConnection()
+  {
+    if (!isConnected()) {
+      return false;
+    }
+
+    char buf[1];
+    ssize_t n = ::recv(sock_, buf, sizeof(buf), MSG_PEEK | MSG_DONTWAIT);
+    if (n > 0) {
+      // Data available - connection is alive
+      return true;
+    } else if (n == 0) {
+      // Connection closed by peer
+      last_error_ = "connection closed by peer";
+      close();
+      return false;
+    } else {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        // No data available but connection is still valid
+        return true;
+      } else if (errno == EINTR) {
+        // Interrupted - try again later
+        return true;
+      } else {
+        // Error - connection broken
+        last_error_ = std::strerror(errno);
+        close();
+        return false;
+      }
+    }
+  }
+
 private:
   bool waitWritable(int timeout_ms)
   {
@@ -273,6 +307,7 @@ public:
     read_period_ = std::chrono::duration<double>(declare_parameter<double>("read_interval", 0.05));
     reconnect_delay_ = std::chrono::duration<double>(declare_parameter<double>("reconnect_delay", 2.0));
     max_reconnect_delay_ = std::chrono::duration<double>(declare_parameter<double>("max_reconnect_delay", 60.0));
+    heartbeat_interval_ = std::chrono::duration<double>(declare_parameter<double>("heartbeat_interval", 5.0));
     stop_command_ = declare_parameter<std::string>("stop_cmd", "C 1500 1500");
     status_frame_id_ = declare_parameter<std::string>("status_frame_id", "thruster_link");
     handshake_ = declare_parameter<std::string>("handshake", "HELLO");
@@ -284,12 +319,17 @@ public:
 
     timer_ = create_wall_timer(read_period_, std::bind(&ThrusterWifiNode::onTimer, this));
     next_reconnect_time_ = std::chrono::steady_clock::now();
+    last_heartbeat_check_ = std::chrono::steady_clock::now();
   }
 
   ~ThrusterWifiNode() override
   {
     if (client_.isConnected() && !stop_command_.empty()) {
-      (void)client_.sendLine(stop_command_);
+      if (client_.sendLine(stop_command_)) {
+        RCLCPP_INFO(get_logger(), "Sent stop command on shutdown: %s", stop_command_.c_str());
+      } else {
+        RCLCPP_WARN(get_logger(), "Failed to send stop command on shutdown");
+      }
     }
     client_.close();
   }
@@ -305,6 +345,19 @@ private:
       return;
     }
 
+    // Perform periodic heartbeat check
+    if (now - last_heartbeat_check_ >= 
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(heartbeat_interval_)) {
+      last_heartbeat_check_ = now;
+      if (!client_.checkConnection()) {
+        RCLCPP_WARN(get_logger(), "Heartbeat check failed: %s", client_.lastError().c_str());
+        next_reconnect_time_ = now;  // Trigger immediate reconnect
+        return;
+      }
+      RCLCPP_DEBUG(get_logger(), "Heartbeat check: connection healthy");
+    }
+
+    RCLCPP_DEBUG(get_logger(), "Polling socket for data");
     pollSocket();
   }
 
@@ -316,19 +369,29 @@ private:
       current_delay = max_reconnect_delay_;
     }
     
+    double delay_sec = std::chrono::duration<double>(current_delay).count();
+    RCLCPP_DEBUG(get_logger(), "Attempting reconnect (failures: %d, delay: %.2fs)", 
+                 consecutive_failures_, delay_sec);
+    
     next_reconnect_time_ = std::chrono::steady_clock::now() + 
       std::chrono::duration_cast<std::chrono::steady_clock::duration>(current_delay);
 
     if (client_.connect(host_, port_, connect_timeout_)) {
       RCLCPP_INFO(get_logger(), "Connected to Arduino WiFi bridge at %s:%d", host_.c_str(), port_);
       consecutive_failures_ = 0;  // Reset on success
+
+      // Reset tracking state on reconnect (Arduino may have rebooted)
+      last_sent_valid_ = false;
+      last_command_was_stop_ = false;
+      RCLCPP_INFO(get_logger(), "State tracking reset after reconnect");
+
       if (!handshake_.empty()) {
         (void)client_.sendLine(handshake_);
       }
     } else {
       consecutive_failures_++;
-      RCLCPP_WARN(get_logger(), "WiFi connect failed (attempt %d): %s", 
-                  consecutive_failures_, client_.lastError().c_str());
+      RCLCPP_WARN(get_logger(), "WiFi connect failed (attempt %d, next retry in %.2fs): %s", 
+                  consecutive_failures_, delay_sec, client_.lastError().c_str());
     }
   }
 
@@ -339,13 +402,52 @@ private:
       return;
     }
 
+    const bool is_stop_command = (msg->left_pwm == 1500 && msg->right_pwm == 1500);
+    const auto now = std::chrono::steady_clock::now();
+
+    // Check if thruster is already in stop state
+    if (is_stop_command && last_sent_valid_ &&
+        last_sent_left_pwm_ == 1500 && last_sent_right_pwm_ == 1500) {
+      RCLCPP_DEBUG(get_logger(), "Thruster already in stop state, command suppressed");
+      return;
+    }
+
+    // Check if we've been sending stop commands for more than 3 seconds
+    if (is_stop_command && last_command_was_stop_) {
+      if (now - last_stop_command_time_ >= stop_command_suppression_) {
+        RCLCPP_DEBUG(get_logger(), "Stop command suppressed (continuous stop > 3s)");
+        return;
+      }
+    }
+
     const std::string payload = formatCommand(msg->left_pwm, msg->right_pwm);
     if (!client_.sendLine(payload)) {
       RCLCPP_ERROR(get_logger(), "Failed to send command: %s", client_.lastError().c_str());
+
+      // Invalidate state on send failure - we don't know the actual state anymore
+      last_sent_valid_ = false;
+      last_command_was_stop_ = false;
+      RCLCPP_WARN(get_logger(), "State tracking invalidated due to send failure");
+
       client_.close();
+      // Trigger immediate reconnect on send failure
+      next_reconnect_time_ = std::chrono::steady_clock::now();
       return;
     }
     RCLCPP_INFO(get_logger(), "TX PWM: %s", payload.c_str());
+
+    // Only update tracking after successful send
+    last_sent_left_pwm_ = msg->left_pwm;
+    last_sent_right_pwm_ = msg->right_pwm;
+    last_sent_valid_ = true;
+
+    // Update stop command tracking
+    if (is_stop_command) {
+      last_stop_command_time_ = now;
+      last_command_was_stop_ = true;
+    } else {
+      last_command_was_stop_ = false;
+    }
   }
 
   void pollSocket()
@@ -371,6 +473,8 @@ private:
 
     if (!client_.isConnected()) {
       RCLCPP_WARN(get_logger(), "WiFi link lost: %s", client_.lastError().c_str());
+      // Trigger immediate reconnect on connection loss
+      next_reconnect_time_ = std::chrono::steady_clock::now();
     }
   }
 
@@ -436,6 +540,7 @@ private:
   std::chrono::duration<double> read_period_;
   std::chrono::duration<double> reconnect_delay_;
   std::chrono::duration<double> max_reconnect_delay_;
+  std::chrono::duration<double> heartbeat_interval_;
   std::string stop_command_;
   std::string status_frame_id_;
   std::string handshake_;
@@ -445,7 +550,18 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
 
   std::chrono::steady_clock::time_point next_reconnect_time_;
+  std::chrono::steady_clock::time_point last_heartbeat_check_;
   int consecutive_failures_;
+
+  // Stop command optimization
+  std::chrono::steady_clock::time_point last_stop_command_time_;
+  bool last_command_was_stop_{false};
+  const std::chrono::steady_clock::duration stop_command_suppression_{std::chrono::seconds(3)};
+
+  // Track last sent PWM values to check if thruster is already in stop state
+  int32_t last_sent_left_pwm_{0};
+  int32_t last_sent_right_pwm_{0};
+  bool last_sent_valid_{false};
 };
 
 }  // namespace thruster_control

@@ -6,6 +6,7 @@ thruster_wifi_node:
     read_interval: 0.05
     reconnect_delay: 2.0
     max_reconnect_delay: 60.0  # Maximum delay between reconnection attempts
+    heartbeat_interval: 1.0     # Interval for periodic connection health checks (seconds) - fast detection
     stop_cmd: "C 1500 1500"
     status_frame_id: "thruster_link"
     handshake: "HELLO"
