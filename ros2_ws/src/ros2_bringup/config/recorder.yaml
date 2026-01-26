@@ -1,0 +1,3 @@
+recorder_node:
+  ros__parameters:
+    output_folder: "/home/eagrumo/rosbags"

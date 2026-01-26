@@ -1,0 +1,30 @@
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+
+
+def generate_launch_description():
+    config_file_arg = DeclareLaunchArgument(
+        'config_file',
+        default_value=PathJoinSubstitution([
+            FindPackageShare('ros2_bringup'),
+            'config',
+            'recorder.yaml',
+        ]),
+        description='Absolute path to the remote_recorder YAML configuration file.'
+    )
+
+    recorder_node = Node(
+        package='remote_recorder',
+        executable='recorder_node',
+        name='recorder_node',
+        output='screen',
+        parameters=[LaunchConfiguration('config_file')],
+    )
+
+    return LaunchDescription([
+        config_file_arg,
+        recorder_node,
+    ])

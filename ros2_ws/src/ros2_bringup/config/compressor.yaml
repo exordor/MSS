@@ -1,0 +1,3 @@
+sensor_downsample_node:
+  ros__parameters:
+    downsample_step: 3

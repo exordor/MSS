@@ -78,6 +78,38 @@ def generate_launch_description():
         description='Bag output name (passed to ros2 bag record -o). Leave empty to use the YAML setting.',
     )
 
+    recorder_config = DeclareLaunchArgument(
+        'recorder_config',
+        default_value=PathJoinSubstitution([
+            FindPackageShare('ros2_bringup'),
+            'config',
+            'recorder.yaml',
+        ]),
+        description='Absolute path to the remote_recorder YAML configuration file.'
+    )
+
+    compressor_config = DeclareLaunchArgument(
+        'compressor_config',
+        default_value=PathJoinSubstitution([
+            FindPackageShare('ros2_bringup'),
+            'config',
+            'compressor.yaml',
+        ]),
+        description='Absolute path to the sensor_compressor YAML configuration file.'
+    )
+
+    compressor_input = DeclareLaunchArgument(
+        'compressor_input',
+        default_value='/navi_lidar/points',
+        description='Input topic for sensor_compressor.'
+    )
+
+    compressor_output = DeclareLaunchArgument(
+        'compressor_output',
+        default_value='/points_downsampled',
+        description='Output topic for sensor_compressor.'
+    )
+
     lidar_node = Node(
         package='hesai_ros_driver',
         executable='hesai_ros_driver_node',
@@ -108,6 +140,26 @@ def generate_launch_description():
         name='thruster_wifi_node',
         output='screen',
         parameters=[LaunchConfiguration('thruster_config')],
+    )
+
+    recorder_node = Node(
+        package='remote_recorder',
+        executable='recorder_node',
+        name='recorder_node',
+        output='screen',
+        parameters=[LaunchConfiguration('recorder_config')],
+    )
+
+    compressor_node = Node(
+        package='sensor_compressor',
+        executable='sensor_compressor',
+        name='sensor_downsample_node',
+        output='screen',
+        parameters=[LaunchConfiguration('compressor_config')],
+        remappings=[
+            ('/navi_lidar/points', LaunchConfiguration('compressor_input')),
+            ('/points_downsampled', LaunchConfiguration('compressor_output')),
+        ],
     )
 
     def launch_bag_record(context, *args, **kwargs):
@@ -161,9 +213,15 @@ def generate_launch_description():
         record_bag,
         record_topics,
         bag_output,
+        recorder_config,
+        compressor_config,
+        compressor_input,
+        compressor_output,
         lidar_node,
         camera_node,
         imu_node,
         thruster_node,
+        recorder_node,
+        compressor_node,
         OpaqueFunction(function=launch_bag_record),
     ])
