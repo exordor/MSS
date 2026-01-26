@@ -30,18 +30,42 @@ echo ""
 echo "🎯 Master Clock Information:"
 echo "----------------------------------------"
 pmc -u -b 0 'GET PARENT_DATA_SET' 2>/dev/null | grep -E "parentPortIdentity|grandmasterIdentity|gm.ClockClass|gm.ClockAccuracy"
+# Convert parentPortIdentity to decimal
+PARENT_HEX=$(pmc -u -b 0 'GET PARENT_DATA_SET' 2>/dev/null | grep "parentPortIdentity" | awk '{print $2}' | cut -d'-' -f1 | tr -d '.')
+if [ -n "$PARENT_HEX" ]; then
+    PARENT_DEC=$(printf "%d" 0x${PARENT_HEX} 2>/dev/null)
+    echo "                parentPortIdentity (decimal)          $PARENT_DEC"
+fi
+# Convert grandmasterIdentity to decimal
+GRANDMASTER_HEX=$(pmc -u -b 0 'GET PARENT_DATA_SET' 2>/dev/null | grep "grandmasterIdentity" | awk '{print $2}' | tr -d '.')
+if [ -n "$GRANDMASTER_HEX" ]; then
+    GRANDMASTER_DEC=$(printf "%d" 0x${GRANDMASTER_HEX} 2>/dev/null)
+    echo "                grandmasterIdentity (decimal)         $GRANDMASTER_DEC"
+fi
 echo ""
 
 # 4. Time Status
 echo "⏱️  Time Status:"
 echo "----------------------------------------"
 pmc -u -b 0 'GET TIME_STATUS_NP' 2>/dev/null | grep -E "master_offset|gmPresent|gmIdentity"
+# Convert gmIdentity to decimal
+GM_HEX=$(pmc -u -b 0 'GET TIME_STATUS_NP' 2>/dev/null | grep "gmIdentity" | awk '{print $2}' | tr -d '.')
+if [ -n "$GM_HEX" ]; then
+    GM_DEC=$(printf "%d" 0x${GM_HEX} 2>/dev/null)
+    echo "                gmIdentity (decimal)       $GM_DEC"
+fi
 echo ""
 
 # 5. Port Status
 echo "🔌 Port Status:"
 echo "----------------------------------------"
 pmc -u -b 0 'GET PORT_DATA_SET' 2>/dev/null | grep -E "portState|portIdentity"
+# Convert portIdentity to decimal
+PORT_HEX=$(pmc -u -b 0 'GET PORT_DATA_SET' 2>/dev/null | grep "portIdentity" | awk '{print $2}' | cut -d'-' -f1 | tr -d '.')
+if [ -n "$PORT_HEX" ]; then
+    PORT_DEC=$(printf "%d" 0x${PORT_HEX} 2>/dev/null)
+    echo "                portIdentity (decimal)      $PORT_DEC"
+fi
 echo ""
 
 # 6. Hardware Timestamping
