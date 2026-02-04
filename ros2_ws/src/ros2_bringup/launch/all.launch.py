@@ -1,15 +1,21 @@
 import os
-
 import yaml
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction, ExecuteProcess
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction, SetEnvironmentVariable
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, TextSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 
+def _env_or_default(name: str, default: str) -> str:
+    return os.environ.get(name, default)
+
+
 def generate_launch_description():
+    # =============================================================================
+    # Launch Parameter Declarations (consistent with original version)
+    # =============================================================================
     lidar_config = DeclareLaunchArgument(
         'lidar_config',
         default_value=PathJoinSubstitution([
@@ -110,12 +116,37 @@ def generate_launch_description():
         description='Output topic for sensor_compressor.'
     )
 
+    log_level_arg = DeclareLaunchArgument(
+        'log_level',
+        default_value=os.environ.get('ROS_LOG_LEVEL', 'info'),
+        description='ROS 2 log level (e.g. debug, info, warn, error, fatal).'
+    )
+    sbg_log_level_arg = DeclareLaunchArgument(
+        'sbg_log_level',
+        default_value=os.environ.get('SBG_LOG_LEVEL', 'debug'),
+        description='SBG device logger level override (default: debug).'
+    )
+
+    log_level = LaunchConfiguration('log_level')
+    ros_args = ['--log-level', log_level]
+
+    env_actions = [
+        SetEnvironmentVariable('PYTHONUNBUFFERED', _env_or_default('PYTHONUNBUFFERED', '1')),
+        SetEnvironmentVariable('RCUTILS_CONSOLE_OUTPUT_FORMAT', _env_or_default(
+            'RCUTILS_CONSOLE_OUTPUT_FORMAT',
+            '[{time}] [{severity}] [{name}] {message}',
+        )),
+        SetEnvironmentVariable('RCUTILS_LOGGING_USE_STDOUT', _env_or_default('RCUTILS_LOGGING_USE_STDOUT', '1')),
+        SetEnvironmentVariable('RCUTILS_COLORIZED_OUTPUT', _env_or_default('RCUTILS_COLORIZED_OUTPUT', '0')),
+    ]
+
     lidar_node = Node(
         package='hesai_ros_driver',
         executable='hesai_ros_driver_node',
         name='navi_lidar_driver',
         output='screen',
         parameters=[{'config_path': LaunchConfiguration('lidar_config')}],
+        ros_arguments=ros_args,
     )
 
     camera_node = Node(
@@ -124,6 +155,7 @@ def generate_launch_description():
         name='galaxy_camera',
         output='screen',
         parameters=[LaunchConfiguration('camera_config')],
+        ros_arguments=ros_args,
     )
 
     imu_node = Node(
@@ -132,6 +164,13 @@ def generate_launch_description():
         name='sbg_device',
         output='screen',
         parameters=[LaunchConfiguration('imu_config')],
+        ros_arguments=[
+            *ros_args,
+            '--log-level', [
+                TextSubstitution(text='sbg_device:='),
+                LaunchConfiguration('sbg_log_level'),
+            ],
+        ],
     )
 
     thruster_node = Node(
@@ -140,6 +179,7 @@ def generate_launch_description():
         name='thruster_wifi_node',
         output='screen',
         parameters=[LaunchConfiguration('thruster_config')],
+        ros_arguments=ros_args,
     )
 
     recorder_node = Node(
@@ -148,6 +188,7 @@ def generate_launch_description():
         name='recorder_node',
         output='screen',
         parameters=[LaunchConfiguration('recorder_config')],
+        ros_arguments=ros_args,
     )
 
     compressor_node = Node(
@@ -160,6 +201,7 @@ def generate_launch_description():
             ('/navi_lidar/points', LaunchConfiguration('compressor_input')),
             ('/points_downsampled', LaunchConfiguration('compressor_output')),
         ],
+        ros_arguments=ros_args,
     )
 
     def launch_bag_record(context, *args, **kwargs):
@@ -180,7 +222,7 @@ def generate_launch_description():
                     data = yaml.safe_load(f) or {}
                 topics = data.get('topics') or []
                 output_name = data.get('output', '')
-            except Exception as exc:  # pragma: no cover - best effort log
+            except Exception as exc:
                 print(f"[all.launch.py] Failed to load bag config {bag_config_path}: {exc}")
         else:
             print(f"[all.launch.py] Bag config not found: {bag_config_path}")
@@ -197,14 +239,18 @@ def generate_launch_description():
         output_name = output_name or 'ros2_bringup_all'
 
         print(f"[all.launch.py] Starting rosbag2 record: output={output_name}, topics={topics}")
-
+        log_level_value = LaunchConfiguration('log_level').perform(context)
+        cmd = ['ros2', 'bag', 'record', '-o', output_name, *topics]
+        if log_level_value:
+            cmd += ['--ros-args', '--log-level', log_level_value]
         return [ExecuteProcess(
-            cmd=['ros2', 'bag', 'record', '-o', output_name, *topics],
+            cmd=cmd,
             name='rosbag2_record',
             output='screen',
         )]
 
     return LaunchDescription([
+        *env_actions,
         lidar_config,
         camera_config,
         imu_config,
@@ -217,6 +263,8 @@ def generate_launch_description():
         compressor_config,
         compressor_input,
         compressor_output,
+        log_level_arg,
+        sbg_log_level_arg,
         lidar_node,
         camera_node,
         imu_node,
