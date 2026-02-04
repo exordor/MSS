@@ -4,6 +4,15 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../.." && pwd)
 WS_DIR="${REPO_ROOT}/ros2_ws"
+source "${SCRIPT_DIR}/lib/logging.sh"
+
+# =============================================================================
+# Argument Parsing
+# =============================================================================
+
+LOGGING_PROFILE=""
+LOGGING_CONFIG=""
+SHOW_LOG_CONFIG=false
 
 DEFAULT_LIDAR_CONFIG="${REPO_ROOT}/config/navi_lidar/qt128.yaml"
 DEFAULT_CAMERA_CONFIG="${REPO_ROOT}/config/camera/ros2.yaml"
@@ -32,6 +41,11 @@ Options:
   --record-bag            Enable rosbag recording (default: disabled)
   --record-topics "LIST"  Space-separated topics to record (overrides bag config topics)
   --bag-output NAME       Bag output name (overrides bag config output, default: temp/rosbag_<timestamp>)
+  --log-profile PROFILE   Logging profile: dev, prod, debug, minimal (default: dev)
+  --log-config PATH       Custom logging config YAML path (default: config/logging/logging.yaml)
+  --show-log-config       Show active logging configuration and exit
+  --log-level LEVEL       ROS 2 log level (overrides profile, default: info)
+  --no-console            Do not print logs to terminal (log files only)
   -h, --help              Show this message and exit
 
 Any args after `--` are forwarded to `ros2 launch`.
@@ -51,6 +65,8 @@ COMPRESSOR_OUTPUT=""
 RECORD_BAG=false
 RECORD_TOPICS=""
 BAG_OUTPUT=""
+LOG_LEVEL=""
+NO_CONSOLE=false
 EXTRA_ARGS=()
 
 while (($#)); do
@@ -68,11 +84,50 @@ while (($#)); do
     --record-bag) RECORD_BAG=true; shift;;
     --record-topics) shift; RECORD_TOPICS="$1"; shift;;
     --bag-output) shift; BAG_OUTPUT="$1"; shift;;
+    --log-profile) shift; LOGGING_PROFILE="$1"; shift;;
+    --log-config) shift; LOGGING_CONFIG="$1"; shift;;
+    --show-log-config) SHOW_LOG_CONFIG=true; shift;;
+    --log-level) shift; LOG_LEVEL="$1"; shift;;
+    --no-console) NO_CONSOLE=true; shift;;
     -h|--help) usage; exit 0;;
     --) shift; EXTRA_ARGS+=("$@"); break;;
     *) EXTRA_ARGS+=("$1"); shift;;
   esac
 done
+
+# =============================================================================
+# Log Directory Setup - Create a separate timestamped directory for each run
+# =============================================================================
+# Export LOGGING_CONFIG for init_ros2_logging to pick up
+if [[ -n "$LOGGING_CONFIG" ]]; then
+  export LOGGING_CONFIG
+fi
+init_ros2_logging "${REPO_ROOT}" "${LOGGING_PROFILE}"
+
+# Show configuration and exit if requested
+if $SHOW_LOG_CONFIG; then
+  show_logging_config
+  exit 0
+fi
+
+# Save runtime metadata to JSON file
+write_runtime_info "$0"
+
+# Main log redirection - Output to both console and log file
+if $NO_CONSOLE; then
+  exec >> "${APP_LOG_DIR}/00_master.log"
+  exec 2>&1
+  export RCUTILS_LOGGING_USE_STDOUT=0
+else
+  exec > >(tee -i "${APP_LOG_DIR}/00_master.log")
+  exec 2>&1
+fi
+
+echo "=========================================="
+echo "ROS2 System Startup"
+echo "Log root: ${LOG_ROOT}"
+echo "Run ID: ${RUN_ID}"
+echo "=========================================="
 
 LIDAR_CONFIG="${LIDAR_CONFIG:-${DEFAULT_LIDAR_CONFIG}}"
 CAMERA_CONFIG="${CAMERA_CONFIG:-${DEFAULT_CAMERA_CONFIG}}"
@@ -112,6 +167,66 @@ else
 fi
 set -u
 
+# =============================================================================
+# Cleanup any orphaned ROS 2 node processes to avoid duplicate node warnings
+# =============================================================================
+for node in "sbg_device" "galaxy_camera" "hesai_ros_driver_node" "thruster_wifi_node" "recorder_node"; do
+  pkill -9 -f "$node" 2>/dev/null || true
+done
+sleep 0.5
+
+start_ros2_healthcheck "all" \
+  "navi_lidar_driver" \
+  "galaxy_camera" \
+  "sbg_device" \
+  "thruster_wifi_node" \
+  "recorder_node" \
+  "sensor_downsample_node"
+
+# =============================================================================
+# Start background log extractors for each sensor node
+# These create separate log files from 00_master.log for easier debugging
+# =============================================================================
+EXTRACTOR_PIDS=()
+
+# Navi LiDAR (actual node name: hesai_ros_driver_node)
+start_node_log_extractor "navi_lidar_driver"
+EXTRACTOR_PIDS+=($!)
+
+# Galaxy Camera
+start_node_log_extractor "galaxy_camera"
+EXTRACTOR_PIDS+=($!)
+
+# IMU (sbg_device)
+start_node_log_extractor "sbg_device"
+EXTRACTOR_PIDS+=($!)
+
+# Thruster
+start_node_log_extractor "thruster_wifi_node"
+EXTRACTOR_PIDS+=($!)
+
+# Sensor compressor/downsample
+start_node_log_extractor "sensor_downsample_node"
+EXTRACTOR_PIDS+=($!)
+
+# Recorder
+start_node_log_extractor "recorder_node"
+EXTRACTOR_PIDS+=($!)
+
+# ZDA publisher
+start_node_log_extractor "zda_publisher"
+EXTRACTOR_PIDS+=($!)
+
+echo "Started ${#EXTRACTOR_PIDS[@]} log extractors, output: ${APP_LOG_DIR}/<node_name>.log"
+
+# Cleanup function to kill extractors on exit
+cleanup_extractors() {
+  for pid in "${EXTRACTOR_PIDS[@]:-}"; do
+    kill "$pid" 2>/dev/null || true
+  done
+}
+trap cleanup_extractors EXIT
+
 LAUNCH_ARGS=(
   "lidar_config:=${LIDAR_CONFIG}"
   "camera_config:=${CAMERA_CONFIG}"
@@ -126,6 +241,10 @@ LAUNCH_ARGS=(
   "record_bag:=${RECORD_BAG}"
 )
 
+if [[ -n "$LOG_LEVEL" ]]; then
+  LAUNCH_ARGS+=("log_level:=${LOG_LEVEL}")
+fi
+
 if [[ -n "$RECORD_TOPICS" ]]; then
   LAUNCH_ARGS+=("record_topics:=${RECORD_TOPICS}")
 fi
@@ -138,5 +257,7 @@ fi
 # Use camera config's directory as working directory since it contains the calibration file
 CAMERA_CONFIG_DIR=$(dirname "${CAMERA_CONFIG}")
 cd "${CAMERA_CONFIG_DIR}"
+
+printf '%q ' ros2 launch ros2_bringup all.launch.py "${LAUNCH_ARGS[@]}" "${EXTRA_ARGS[@]}" > "${META_LOG_DIR}/launch_cmd.txt"
 
 ros2 launch ros2_bringup all.launch.py "${LAUNCH_ARGS[@]}" "${EXTRA_ARGS[@]}"
