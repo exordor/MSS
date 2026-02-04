@@ -9,8 +9,11 @@ sm-cli info ./myMap.simplemap
 
 # convert to mm
 
-sm2mm -i ./myMap.simplemap -o myMap.mm --externals-dir ./myMap_Image
+sm2mm -i ./myMap.simplemap -o myMap.mm --externals-dir ./myMap_Images
 
 # view mm
 
 mm-viewer ./myMap.mm
+
+# ply
+mm2ply -i myMap.mm -o myMap.ply
