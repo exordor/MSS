@@ -200,10 +200,10 @@ monitoring:
   fallback_to_shell: true
   # Cache TTL (Time-To-Live) for different data types (seconds)
   cache_ttl:
-    ros2: 5                # ROS2 node list cache (increased from 3)
-    sensors: 5             # Sensor diagnostic results cache (increased from 2)
-    topics: 5              # Topic info cache
-    frequency: 10          # Frequency measurement cache
+    ros2: 3                # ROS2 node list cache
+    sensors: 1             # Sensor diagnostic results cache (实时更新)
+    topics: 3              # Topic info cache
+    frequency: 5           # Frequency measurement cache
 
   # Frequency monitoring configuration
   frequency_monitoring:

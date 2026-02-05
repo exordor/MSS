@@ -147,7 +147,9 @@ The service configuration includes:
 - ROS2 environment variables (PATH, AMENT_PREFIX_PATH, PYTHONPATH, LD_LIBRARY_PATH)
 - ROS_DOMAIN_ID=42
 - Automatic restart on failure
+- TimeoutStopSec=5 (fast shutdown, was 90s default)
 - Journal logging for diagnostics
+- Proper cleanup: stops ROS2 subprocess and cancels background tasks on shutdown
 
 ## Configuration
 
@@ -369,6 +371,7 @@ pytest tests/ui/ --headed
 - **Alert Storage**: SQLite database at `data/alerts.db`
 - **Log Location**: Application logs in `logs/` directory
 - **Service Logs**: `journalctl -u ros2-diagnostic -f` for live service logs
+- **Service Restart**: Completes in <5 seconds (background tasks are properly cancelled)
 
 ## Time Machine Proxy
 

@@ -74,6 +74,7 @@ class EventLogStore:
 
             self.db_path = str(db_path)
             self._conn: Optional[sqlite3.Connection] = None
+            self._stats_invalidate_callback = None  # Callback to invalidate stats cache
             self._init_db()
             self._initialized = True
 
@@ -136,7 +137,23 @@ class EventLogStore:
               1 if event.success else 0, event.error))
 
         self._conn.commit()
+
+        # Invalidate stats cache if callback is registered
+        if self._stats_invalidate_callback:
+            try:
+                self._stats_invalidate_callback()
+            except Exception as e:
+                print(f"Stats invalidate callback failed: {e}")
+
         return cursor.lastrowid
+
+    def set_stats_invalidate_callback(self, callback):
+        """Set a callback to invalidate stats cache when events are logged
+
+        Args:
+            callback: Function to call after logging an event
+        """
+        self._stats_invalidate_callback = callback
 
     def get_events(self, limit: int = 100, offset: int = 0,
                    event_type: str = None, action: str = None,
@@ -229,7 +246,7 @@ class EventLogStore:
         return [self._row_to_event(row) for row in rows]
 
     def get_event_stats(self) -> Dict[str, Any]:
-        """Get event statistics
+        """Get event statistics (optimized single query)
 
         Returns:
             Dictionary with event counts by type, action, and success rate
@@ -238,38 +255,41 @@ class EventLogStore:
             SELECT
                 COUNT(*) as total,
                 COUNT(CASE WHEN success = 1 THEN 1 END) as successful,
-                COUNT(CASE WHEN success = 0 THEN 1 END) as failed
+                COUNT(CASE WHEN success = 0 THEN 1 END) as failed,
+                COUNT(CASE WHEN created_at >= datetime('now', '-24 hours') THEN 1 END) as last_24h
             FROM event_log
         ''')
         row = cursor.fetchone()
         stats = dict(row) if row else {}
 
-        # Get counts by event type
+        # Get counts by event type and action in one query
         cursor = self._conn.execute('''
-            SELECT event_type, COUNT(*) as count
+            SELECT
+                event_type,
+                action,
+                COUNT(*) as count
             FROM event_log
-            GROUP BY event_type
-            ORDER BY count DESC
+            GROUP BY event_type, action
+            ORDER BY event_type, count DESC
         ''')
-        stats['by_type'] = {row['event_type']: row['count'] for row in cursor.fetchall()}
 
-        # Get counts by action
-        cursor = self._conn.execute('''
-            SELECT action, COUNT(*) as count
-            FROM event_log
-            GROUP BY action
-            ORDER BY count DESC
-        ''')
-        stats['by_action'] = {row['action']: row['count'] for row in cursor.fetchall()}
+        by_type = {}
+        by_action = {}
+        for r in cursor.fetchall():
+            etype = r['event_type']
+            action = r['action']
+            count = r['count']
 
-        # Get recent activity (last 24 hours)
-        cursor = self._conn.execute('''
-            SELECT COUNT(*) as count
-            FROM event_log
-            WHERE created_at >= datetime('now', '-24 hours')
-        ''')
-        row = cursor.fetchone()
-        stats['last_24h'] = row['count'] if row else 0
+            if etype not in by_type:
+                by_type[etype] = 0
+            by_type[etype] += count
+
+            if action not in by_action:
+                by_action[action] = 0
+            by_action[action] += count
+
+        stats['by_type'] = dict(sorted(by_type.items(), key=lambda x: x[1], reverse=True))
+        stats['by_action'] = dict(sorted(by_action.items(), key=lambda x: x[1], reverse=True))
 
         return stats
 

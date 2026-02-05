@@ -15,7 +15,7 @@ const SENSOR_INFO = {
 
 // Sensor update tracking
 let sensorsLastUpdate = 0;
-let sensorsUpdateInterval = 5000; // 5 seconds (matching backend)
+let sensorsUpdateInterval = 1000; // 1 second (matching backend)
 
 // Local cache for sensor data (from WebSocket)
 let sensorsCache = {};

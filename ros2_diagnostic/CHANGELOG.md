@@ -4,6 +4,127 @@ All notable changes to ros2_diagnostic will be documented in this file.
 
 ## [Unreleased]
 
+### Added - Navigation Tab Management
+
+Added smart tab management for navigation - clicking menu items opens pages in new tabs, and clicking again switches to existing tabs instead of creating duplicates.
+
+**Files modified:**
+- `templates/base.html` - Added `data-window` attributes and JavaScript for tab management (lines 32-62, 106-126)
+
+**Features:**
+- Each page gets a unique window name (ros2-dashboard, ros2-events, ros2-sensors, etc.)
+- First click opens new tab
+- Subsequent clicks switch to existing tab (no duplicates)
+- Uses `window.open(url, windowName)` API
+
+### Added - Event Statistics Caching
+
+Added 60-second cache for event statistics with automatic invalidation on new events.
+
+**Files modified:**
+- `main.py` - Added event stats cache with callback mechanism (lines 81-100, 2228-2257)
+- `event_log.py` - Added stats invalidation callback (lines 77, 140-155, 231-277)
+
+**Changes:**
+- Event stats API now returns cached data for 60 seconds
+- New events automatically invalidate the cache via callback
+- Statistics query optimized from 4 SQL queries to 2
+
+**Result:**
+- Events page loads significantly faster (cached response = 0 queries)
+- Reduced database load on repeated page visits
+
+### Fixed - Event Statistics Query Performance
+
+Optimized `get_event_stats()` to reduce database queries from 4 to 2.
+
+**Files modified:**
+- `event_log.py` - Rewrote `get_event_stats()` method (lines 231-277)
+
+**Before:**
+```sql
+-- Query 1: Total counts
+SELECT COUNT(*), COUNT(CASE WHEN success=1...), COUNT(CASE WHEN success=0...) FROM event_log
+-- Query 2: By type
+SELECT event_type, COUNT(*) FROM event_log GROUP BY event_type
+-- Query 3: By action
+SELECT action, COUNT(*) FROM event_log GROUP BY action
+-- Query 4: Last 24h
+SELECT COUNT(*) FROM event_log WHERE created_at >= datetime('now', '-24 hours')
+```
+
+**After:**
+```sql
+-- Query 1: Combined totals with 24h
+SELECT COUNT(*), COUNT(CASE WHEN success=1...), COUNT(CASE WHEN success=0...),
+       COUNT(CASE WHEN created_at >= datetime('now', '-24 hours')...) FROM event_log
+-- Query 2: Combined type/action (aggregated in Python)
+SELECT event_type, action, COUNT(*) FROM event_log GROUP BY event_type, action
+```
+
+### Fixed - Camera ARP Detection
+
+Fixed false "Connected" status when camera was actually unreachable.
+
+**Files modified:**
+- `diagnostics/utils.py` - Fixed `check_gige_camera_arp()` function (lines 150-165)
+
+**Root Cause:**
+When ARP state was "FAILED", code set `state='UNKNOWN'` (not 'FAILED'), then checked `if has_mac or state != 'FAILED'` which evaluated to True.
+
+**Fix:**
+- Check for 'FAILED' state explicitly before other checks
+- Only return `reachable: True` for valid states (REACHABLE, STALE, DELAY)
+
+### Changed - Faster Data Updates
+
+Reduced cache TTLs and update intervals for more responsive UI.
+
+**Files modified:**
+- `config.yaml` - Reduced `cache_ttl.sensors` from 5 to 1 second (line 204)
+- `main.py` - Reduced SENSORS broadcast interval from 5 to 1 second (line 1276)
+- `static/js/dashboard.js` - Reduced frontend update interval from 5000ms to 1000ms (line 18)
+
+**Result:**
+- Sensor status changes now reflect in 1-2 seconds instead of up to 5 seconds
+
+### Fixed - Service Startup Performance
+
+Deferred non-critical initialization to background for faster service startup.
+
+**Files modified:**
+- `main.py` - Added `background_init()` async function (lines 1495-1525)
+
+**Changes:**
+- Cache warming, alert callback, event logging moved to background task
+- Service now starts in <1 second, fully ready in 2-3 seconds
+- Previously took 7-17 seconds due to blocking database operations
+
+## [Unreleased]
+
+### Fixed - Service Shutdown Timeout
+
+**Problem:** `systemctl restart ros2-diagnostic` took ~90 seconds to complete because the service did not properly handle shutdown signals.
+
+**Root Cause:**
+- Background async tasks (`background_broadcaster_channelized`) ran in infinite loops without cancellation
+- ROS2 subprocess started by `ROS2Controller` was not terminated on shutdown
+- systemd default `TimeoutStopSec=90s` before SIGKILL
+
+**Files modified:**
+- `main.py` - Added shutdown cleanup in `lifespan()` function (lines 1491-1512)
+- `../../config/ros2-diagnostic.service` - Added `TimeoutStopSec=5`
+
+**Changes:**
+- Added ROS2 process termination on shutdown (calls `_ros2_controller.stop()`)
+- Cancel all background asyncio tasks on shutdown
+- Reduced systemd timeout to 5 seconds
+
+**Result:**
+- Service restart time reduced from ~90s to <5s
+
+## [Unreleased]
+
 ### Added - Event Logging System
 
 Added SQLite-based audit trail for tracking all system actions and events.

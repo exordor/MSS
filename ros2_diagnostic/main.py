@@ -78,6 +78,33 @@ _cache_stats_lock = Lock()
 _wireless_ip_cache = {"value": None, "time": 0}
 _wireless_ip_lock = Lock()
 
+# Event stats cache (60 second TTL)
+_event_stats_cache = {"value": None, "time": 0}
+_event_stats_lock = Lock()
+_EVENT_STATS_TTL = 60  # Statistics only need to refresh every minute
+
+# Event store callback setup
+_event_store_callback_registered = False
+
+
+def _invalidate_event_stats():
+    """Invalidate event stats cache (called when events are logged)"""
+    with _event_stats_lock:
+        _event_stats_cache["time"] = 0  # Force cache refresh
+
+
+def _ensure_event_store_callback():
+    """Ensure event stats invalidate callback is registered once"""
+    global _event_store_callback_registered
+    if not _event_store_callback_registered:
+        try:
+            event_store = get_event_store()
+            event_store.set_stats_invalidate_callback(_invalidate_event_stats)
+            _event_store_callback_registered = True
+            logger.info("[Event Log] Stats cache callback registered")
+        except Exception as e:
+            logger.warning(f"[Event Log] Failed to register stats callback: {e}")
+
 # Previous state for incremental updates
 _prev_state = {}
 _state_lock = Lock()
@@ -108,7 +135,7 @@ def calculate_state_diff(prev: dict, curr: dict) -> dict:
 
 class Channel(Enum):
     """WebSocket 数据频道"""
-    SENSORS = "sensors"       # 传感器状态 (5秒)
+    SENSORS = "sensors"       # 传感器状态 (1秒)
     ALERTS = "alerts"         # 告警 (实时)
     ROS2 = "ros2"            # ROS2 系统 (10秒)
     ROS2_CONTROL = "ros2_control"  # ROS2 控制 (5秒)
@@ -241,8 +268,9 @@ class ConnectionManager:
                     channels = {Channel.SENSORS, Channel.ALERTS, Channel.ROS2, Channel.ROS2_CONTROL, Channel.ROSBAG}
 
         state = {}
+        # Use parallel async check for sensors (faster, doesn't block)
         if Channel.SENSORS in channels:
-            state["sensors"] = collect_sensor_status_cached()
+            state["sensors"] = await collect_sensor_status_parallel()
         if Channel.ROS2 in channels:
             state["ros2"] = collect_ros2_status_cached()
         if Channel.ROS2_CONTROL in channels:
@@ -739,7 +767,7 @@ async def check_sensor_async(sensor_name: str) -> Dict[str, Any]:
 
 async def collect_sensor_status_parallel() -> Dict[str, Any]:
     """Collect sensor status in parallel using asyncio."""
-    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster']
+    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery']
 
     # Run all sensor checks in parallel
     tasks = [check_sensor_async(name) for name in sensor_names]
@@ -1270,9 +1298,9 @@ def collect_active_alerts() -> List[Dict]:
 # 频道配置（按更新频率分离）
 CHANNEL_CONFIG = {
     Channel.SENSORS: {
-        "interval": 5,        # 5 秒更新
+        "interval": 1,        # 1 秒更新 (实时响应)
         "priority": "high",   # 高优先级
-        "cache_ttl": 2,       # 使用 2 秒缓存
+        "cache_ttl": 0.5,     # 使用 0.5 秒缓存 (最小化延迟)
     },
     Channel.ALERTS: {
         "interval": 0,        # 实时推送（由回调触发）
@@ -1413,6 +1441,28 @@ def background_collector_thread():
 # FastAPI Lifespan
 # =============================================================================
 
+async def warm_cache_on_startup():
+    """Warm up caches in background after startup to avoid blocking first connection"""
+    logger.info("[CACHE] Starting cache warm-up...")
+    start_time = time.time()
+
+    try:
+        # Warm sensor cache in parallel (non-blocking)
+        sensors_data = await collect_sensor_status_parallel()
+        logger.info(f"[CACHE] Sensor cache warmed in {time.time() - start_time:.2f}s")
+    except Exception as e:
+        logger.warning(f"[CACHE] Sensor cache warm-up failed: {e}")
+
+    try:
+        # Warm ROS2 status cache
+        ros2_data = collect_ros2_status()
+        logger.info(f"[CACHE] ROS2 cache warmed in {time.time() - start_time:.2f}s")
+    except Exception as e:
+        logger.warning(f"[CACHE] ROS2 cache warm-up failed: {e}")
+
+    logger.info(f"[CACHE] Warm-up completed in {time.time() - start_time:.2f}s")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan"""
@@ -1422,24 +1472,8 @@ async def lifespan(app: FastAPI):
     logger.info(f"Access the web interface at: http://localhost:5000")
     logger.info(f"API docs at: http://localhost:5000/docs")
 
-    # Log system start event
-    if EVENT_LOG_CONFIG.get("enabled", True):
-        event_store = get_event_store()
-        event_store.log_event(EventLog(
-            event_type='system_start',
-            action='start',
-            resource='diagnostic_system',
-            message='ROS2 Diagnostic System started',
-            created_at=datetime.now().isoformat(),
-            success=True
-        ))
-        logger.info("[Event Log] System start event logged")
-
-    # 设置告警实时推送回调
-    from alerts import get_alert_store
-    alert_store = get_alert_store()
-    alert_store.set_alert_callback(broadcast_alert)
-    logger.info("[WS] Alert callback registered for real-time push")
+    # 启动后台初始化任务 (非阻塞，服务立即可用)
+    asyncio.create_task(background_init())
 
     # Start background broadcaster (new channelized version)
     asyncio.create_task(background_broadcaster_channelized())
@@ -1452,6 +1486,64 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down...")
+
+    # Stop ROS2 process if running
+    try:
+        if _ros2_controller is not None:
+            status = _ros2_controller.check_running()
+            if status.get('running'):
+                logger.info("Stopping ROS2 process...")
+                _ros2_controller.stop()
+    except Exception as e:
+        logger.warning(f"Error stopping ROS2: {e}")
+
+    # Cancel all background tasks
+    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    if tasks:
+        logger.info(f"Cancelling {len(tasks)} background tasks...")
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    logger.info("Shutdown complete")
+
+
+# =============================================================================
+# Background Initialization
+# =============================================================================
+
+async def background_init():
+    """后台初始化任务 - 延迟执行非关键操作，让服务快速启动"""
+    try:
+        # 延迟初始化数据库和缓存，避免阻塞服务启动
+        await asyncio.sleep(0.5)  # 让服务先完全启动
+
+        # 1. 预热缓存
+        await warm_cache_on_startup()
+
+        # 2. 初始化告警存储和回调 (延迟到后台)
+        from alerts import get_alert_store
+        alert_store = get_alert_store()
+        alert_store.set_alert_callback(broadcast_alert)
+        logger.info("[WS] Alert callback registered (background)")
+
+        # 2.5 初始化事件统计缓存回调
+        _ensure_event_store_callback()
+
+        # 3. 记录启动事件 (延迟到后台)
+        if EVENT_LOG_CONFIG.get("enabled", True):
+            event_store = get_event_store()
+            event_store.log_event(EventLog(
+                event_type='system_start',
+                action='start',
+                resource='diagnostic_system',
+                message='ROS2 Diagnostic System started',
+                created_at=datetime.now().isoformat(),
+                success=True
+            ))
+            logger.info("[Event Log] System start event logged (background)")
+    except Exception as e:
+        logger.warning(f"[BG_INIT] Background init task failed: {e}")
 
 
 # =============================================================================
@@ -2180,7 +2272,7 @@ async def get_event_logs(
 
 @app.get("/api/events/stats")
 async def get_event_stats() -> JSONResponse:
-    """Get event statistics"""
+    """Get event statistics (with 60s cache)"""
     if not EVENT_LOG_CONFIG.get("enabled", True):
         return JSONResponse(
             content={"success": False, "error": "Event logging is disabled"},
@@ -2188,8 +2280,22 @@ async def get_event_stats() -> JSONResponse:
         )
 
     try:
+        # Check cache first
+        with _event_stats_lock:
+            cached = _event_stats_cache.get("value")
+            cache_time = _event_stats_cache.get("time", 0)
+            if cached and (time.time() - cache_time) < _EVENT_STATS_TTL:
+                return JSONResponse(content={"success": True, "data": cached})
+
+        # Cache miss or expired, fetch fresh data
         event_store = get_event_store()
         stats = event_store.get_event_stats()
+
+        # Update cache
+        with _event_stats_lock:
+            _event_stats_cache["value"] = stats
+            _event_stats_cache["time"] = time.time()
+
         return JSONResponse(content={"success": True, "data": stats})
     except Exception as e:
         logger.error(f"Error getting event stats: {e}")
