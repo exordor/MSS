@@ -119,6 +119,8 @@ if $NO_CONSOLE; then
   exec 2>&1
   export RCUTILS_LOGGING_USE_STDOUT=0
 else
+  # Enable RCLCPP logging to stdout so it gets captured by tee
+  export RCUTILS_LOGGING_USE_STDOUT=1
   exec > >(tee -i "${APP_LOG_DIR}/00_master.log")
   exec 2>&1
 fi
