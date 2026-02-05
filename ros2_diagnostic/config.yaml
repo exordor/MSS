@@ -1,0 +1,241 @@
+# =============================================================================
+# ROS2 Diagnostic System Configuration
+# =============================================================================
+# This configuration file controls the behavior of the ros2_diagnostic system,
+# which monitors sensor health, ROS2 node status, and system metrics for the
+# underwater robot.
+# =============================================================================
+
+# Project root directory (empty = use current working directory)
+project_root: ""
+
+# ------------------------------------------------------------------------------
+# ROS2 Environment Configuration
+# ------------------------------------------------------------------------------
+ros2:
+  # ROS2 DDS domain ID (must match all ROS2 nodes in the system)
+  domain_id: 42
+  # Path to ROS2 setup script (environment initialization)
+  source_cmd: "/opt/ros/humble/setup.bash"
+  # ROS2 workspace directory (relative to project_root)
+  workspace: "ros2_ws"
+  # Main launch script that starts all ROS2 nodes
+  launch_script: "scripts/ros2/run_ros2_all.sh"
+
+# ------------------------------------------------------------------------------
+# ROS2 Control Script Configuration
+# ------------------------------------------------------------------------------
+ros2_control:
+  # Script for controlling ROS2 (default: no auto-record)
+  script: "scripts/ros2/run_ros2_all.sh"
+
+# ------------------------------------------------------------------------------
+# Rosbag Configuration
+# ------------------------------------------------------------------------------
+rosbag:
+  # Path to rosbag configuration file
+  config_path: "config/rosbag/rosbag_ros2.yaml"
+  # Directory where rosbag files are stored
+  output_folder: "rosbags"
+  # ROS2 service name to start recording
+  start_service: "start_recording"
+  # ROS2 service name to stop recording
+  stop_service: "stop_recording"
+  # Maximum time to wait for service response (seconds)
+  service_timeout_sec: 15.0
+
+# ------------------------------------------------------------------------------
+# Logging Configuration
+# ------------------------------------------------------------------------------
+logs:
+  # Base directory for all log files
+  base_dir: "logs"
+  # Path to diagnostic system log file
+  diagnostic_log: "ros2_diagnostic/logs/diagnostic.log"
+  # Path to ROS2 control log file
+  ros2_control_log: "ros2_diagnostic/logs/ros2.log"
+
+# ------------------------------------------------------------------------------
+# Sensor Configuration
+# ------------------------------------------------------------------------------
+sensors:
+  # IP addresses of network-connected sensors
+  ips:
+    navi_lidar: "192.168.0.201"    # Navigational LiDAR (main obstacle detection)
+    uli_lidar: "192.168.0.10"      # U-LiDAR (web control only, no ROS driver)
+    camera: "192.168.0.11"         # GigE camera for visual sensing
+    thruster: "192.168.50.100"     # Thruster controller WiFi module
+    time_machine: "192.168.0.20"   # Time synchronization server (PTP grandmaster)
+
+  # Diagnostic thresholds for each sensor (determine OK/WARNING/CRITICAL status)
+  thresholds:
+    # Navi-LiDAR thresholds (main navigation LiDAR)
+    navi_lidar:
+      min_frequency: 8.0           # Minimum point cloud publish rate (Hz)
+      max_packet_loss: 1.0         # Maximum acceptable packet loss (%)
+      udp_timeout: 5.0             # UDP connection timeout (seconds)
+      min_points_per_frame: 50000  # Minimum expected points per scan
+
+    # U-LiDAR thresholds (network connectivity test only, no ROS driver)
+    uli_lidar: {}                  # Empty: only ping/connectivity tests performed
+
+    # Camera thresholds (GigE machine vision camera)
+    camera:
+      min_frequency: 1.5           # Minimum frame rate (FPS)
+      max_frequency: 2.5           # Maximum frame rate (FPS)
+      max_latency: 500             # Maximum image latency (milliseconds)
+      gige_timeout: 5.0            # GigE connection timeout (seconds)
+      expected_resolution: [4096, 3000]  # [width, height] in pixels
+
+    # IMU thresholds (only topic existence and one-time data check)
+    imu: {}
+
+    # Thruster thresholds (propulsion control system)
+    thruster:
+      heartbeat_timeout: 3.0       # Maximum time between heartbeat messages (seconds)
+      tcp_timeout: 5.0             # TCP connection timeout (seconds)
+      max_response_time: 500       # Maximum command response time (milliseconds)
+
+    # PTP (Precision Time Protocol) thresholds
+    ptp:
+      max_time_offset: 0.1         # Maximum time offset from master (seconds)
+      timeout: 10.0                # PTP sync operation timeout (seconds)
+
+  # ROS2 topic names for each sensor's data streams
+  topics:
+    navi_lidar:
+      points: "/navi_lidar/points"           # Point cloud data (PointCloud2)
+      # packets: "/navi_lidar/packets"         # Packet statistics
+      # packet_loss: "/navi_lidar/packets_loss"  # Packet loss metrics
+
+    uli_lidar: {}                   # Empty: U-LiDAR has no ROS topics (web control only)
+
+    camera:
+      # image_raw: "/image_raw"                    # Uncompressed image data
+      # image_compressed: "/image_raw/compressed"  # JPEG compressed image
+      camera_info: "/camera_info"                # Camera calibration info
+
+    imu:
+      data: "/imu/data"               # Main IMU data (orientation, acceleration)
+
+
+    # IMU serial port configuration
+    imu_serial:
+      # List of serial ports to try (in order, first found wins)
+      # Can be modified when hardware changes
+      ports:
+        - "/dev/serial/by-id/usb-FTDI_USB-RS232-WE_AV0LWWD1-if00-port0"
+        - "/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_B001WVHZ-if00-port0"
+        - "/dev/serial/by-id/usb-FTDI_USB-RS232_Cable_FT3R66K9-if00-port0"
+        - "/dev/ttyUSB0"
+        - "/dev/ttyACM0"
+      # Fallback port if none found above
+      default: "/dev/ttyUSB0"
+
+    thruster:
+      status: "/thruster_status_pwm"   # Thruster status and PWM values
+
+    ptp:
+      zda: "/ptp/zda"                  # ZDA time message (UTC time)
+
+# ------------------------------------------------------------------------------
+# ROS2 Node Monitoring
+# ------------------------------------------------------------------------------
+ros2_nodes:
+  # List of ROS2 nodes that should be running in a healthy system
+  expected:
+    - "navi_lidar_driver"    # Main LiDAR driver
+    - "galaxy_camera"        # GigE camera driver
+    - "sbg_device"           # IMU/GPS driver
+    - "thruster_wifi_node"   # Thruster communication node
+    - "sensor_compressor"    # Data compression node
+    - "recorder_node"        # Rosbag recording node
+
+  # ROS2 nodes to ignore when detecting (CLI helpers, etc.)
+  ignored:
+    - "diagnostic_helper"    # Internal diagnostic helper node
+    - "ros2cli"              # ROS2 command line interface nodes
+    - "_ros2cli"             # Internal CLI nodes
+
+  # Mapping of sensor names to their corresponding ROS2 node(s)
+  sensor_nodes:
+    navi_lidar: ["navi_lidar_driver"]
+    uli_lidar: []            # Empty: U-LiDAR has no ROS driver
+    camera: ["galaxy_camera"]
+    imu: ["sbg_device"]
+    thruster: ["thruster_wifi_node"]
+
+# ------------------------------------------------------------------------------
+# Sensor Connection Types
+# ------------------------------------------------------------------------------
+sensor_connections:
+  navi_lidar: "network"    # Ethernet (UDP)
+  uli_lidar: "network"     # Ethernet (web interface only)
+  camera: "network"        # GigE Vision protocol
+  imu: "usb"               # Serial-over-USB connection
+  thruster: "network"      # WiFi (TCP)
+
+# ------------------------------------------------------------------------------
+# Monitoring Behavior
+# ------------------------------------------------------------------------------
+monitoring:
+  # Enable detailed topic information (increases CPU usage)
+  enable_topic_details: false
+  # Enable rclpy-based frequency monitoring (preferred over shell commands)
+  enable_rclpy_monitoring: true
+  # Fallback to shell commands if rclpy monitoring fails
+  fallback_to_shell: true
+  # Cache TTL (Time-To-Live) for different data types (seconds)
+  cache_ttl:
+    ros2: 5                # ROS2 node list cache (increased from 3)
+    sensors: 5             # Sensor diagnostic results cache (increased from 2)
+    topics: 5              # Topic info cache
+    frequency: 10          # Frequency measurement cache
+
+  # Frequency monitoring configuration
+  frequency_monitoring:
+    window_seconds: 5.0    # Frequency calculation window (seconds)
+    min_messages: 2        # Minimum messages required for frequency calculation
+
+# ------------------------------------------------------------------------------
+# Chart Configuration
+# ------------------------------------------------------------------------------
+charts:
+  short: 30                # Short-term chart duration (seconds)
+  medium: 90               # Medium-term chart duration (seconds)
+  long: 300                # Long-term chart duration (seconds)
+
+# ------------------------------------------------------------------------------
+# UI Configuration
+# ------------------------------------------------------------------------------
+ui:
+  refresh_interval: 2000           # Dashboard refresh interval (milliseconds)
+  chart_update_interval: 1000      # Chart data update interval (milliseconds)
+  max_log_lines: 100               # Maximum log lines to display
+  ping_timeout: 1                  # Ping timeout for connectivity tests (seconds) (reduced from 2)
+  ping_count: 2                    # Number of ping packets per test (reduced from 4)
+
+# ------------------------------------------------------------------------------
+# External Tools Configuration
+# ------------------------------------------------------------------------------
+tools:
+  config_files:
+    lidar: "config/navi_lidar/qt128.yaml"          # LiDAR driver configuration
+    camera: "config/camera/ros2.yaml"              # Camera driver configuration
+    imu: "config/imu/sbg_ros2.yaml"                # IMU driver configuration
+    thruster: "config/thruster/thruster_wifi.yaml" # Thruster configuration
+
+# ------------------------------------------------------------------------------
+# FastAPI / WebSocket Configuration
+# ------------------------------------------------------------------------------
+fastapi:
+  host: "0.0.0.0"
+  port: 5000
+  reload: true
+  log_level: "info"
+
+websocket:
+  ping_interval: 30      # WebSocket ping interval (seconds)
+  ping_timeout: 10       # WebSocket ping timeout (seconds)
+  max_connections: 10    # Maximum simultaneous WebSocket connections
+  broadcast_interval: 5  # State broadcast interval (seconds)

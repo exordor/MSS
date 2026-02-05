@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+
+{% block title %}Sensors - ROS2 System Diagnostic{% endblock %}
+
+{% block content %}
+<div class="sensors-container">
+    <!-- Page Header -->
+    <div class="page-header">
+        <h1><i class="fa-solid fa-microchip"></i> Sensor Diagnostics</h1>
+        <p class="page-subtitle">Detailed health monitoring for all sensors</p>
+    </div>
+
+    <!-- Sensor Tabs -->
+    <div class="sensor-tabs">
+        <button class="sensor-tab active" data-sensor="navi_lidar">
+            <i class="fa-solid fa-radar"></i> Navi LiDAR
+        </button>
+        <button class="sensor-tab" data-sensor="uli_lidar">
+            <i class="fa-solid fa-satellite-dish"></i> U-LiDAR
+        </button>
+        <button class="sensor-tab" data-sensor="camera">
+            <i class="fa-solid fa-camera"></i> Camera
+        </button>
+        <button class="sensor-tab" data-sensor="imu">
+            <i class="fa-solid fa-compass"></i> IMU
+        </button>
+        <button class="sensor-tab" data-sensor="thruster">
+            <i class="fa-solid fa-anchor"></i> Thruster
+        </button>
+    </div>
+
+    <!-- Navi LiDAR Panel -->
+    <div class="sensor-panel active" id="navi_lidarPanel">
+        <div class="panel-header">
+            <div class="panel-title">
+                <i class="fa-solid fa-radar"></i>
+                <h2>Navi LiDAR (Hesai QT128)</h2>
+            </div>
+            <span class="status-badge large" id="naviLidarStatusBadge">Checking...</span>
+        </div>
+
+        <div class="panel-sections">
+            <!-- Connection Status -->
+            <div class="panel-section">
+                <h3><i class="fa-solid fa-network-wired"></i> Connection Status</h3>
+                <div class="connection-info">
+                    <div class="info-row">
+                        <span class="info-label">IP Address</span>
+                        <span class="info-value">192.168.0.201</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Port</span>
+                        <span class="info-value">2368 (UDP)</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Status</span>
+                        <span class="info-value" id="naviLidarConnStatus">--</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Latency</span>
+                        <span class="info-value" id="naviLidarLatency">-- ms</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- U-LiDAR Panel -->
+    <div class="sensor-panel" id="uli_lidarPanel">
+        <div class="panel-header">
+            <div class="panel-title">
+                <i class="fa-solid fa-satellite-dish"></i>
+                <h2>U-LiDAR</h2>
+            </div>
+            <span class="status-badge large" id="uliLidarStatusBadge">Checking...</span>
+        </div>
+
+        <div class="panel-sections">
+            <!-- Connection Status -->
+            <div class="panel-section">
+                <h3><i class="fa-solid fa-network-wired"></i> Connection Status</h3>
+                <div class="connection-info">
+                    <div class="info-row">
+                        <span class="info-label">IP Address</span>
+                        <span class="info-value">192.168.0.10</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Port</span>
+                        <span class="info-value">2368 (UDP)</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Status</span>
+                        <span class="info-value" id="uliLidarConnStatus">--</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Latency</span>
+                        <span class="info-value" id="uliLidarLatency">-- ms</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Camera Panel -->
+    <div class="sensor-panel" id="cameraPanel">
+        <div class="panel-header">
+            <div class="panel-title">
+                <i class="fa-solid fa-camera"></i>
+                <h2>Galaxy Camera</h2>
+            </div>
+            <span class="status-badge large" id="cameraStatusBadge">Checking...</span>
+        </div>
+
+        <div class="panel-sections">
+            <!-- Connection Status -->
+            <div class="panel-section">
+                <h3><i class="fa-solid fa-network-wired"></i> Connection Status</h3>
+                <div class="connection-info">
+                    <div class="info-row">
+                        <span class="info-label">IP Address</span>
+                        <span class="info-value">192.168.0.11</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Interface</span>
+                        <span class="info-value">GigE</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Status</span>
+                        <span class="info-value" id="cameraConnStatus">--</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Bandwidth</span>
+                        <span class="info-value" id="cameraBandwidth">-- MB/s</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- IMU Panel -->
+    <div class="sensor-panel" id="imuPanel">
+        <div class="panel-header">
+            <div class="panel-title">
+                <i class="fa-solid fa-compass"></i>
+                <h2>SBG IMU</h2>
+            </div>
+            <span class="status-badge large" id="imuStatusBadge">Checking...</span>
+        </div>
+
+        <div class="panel-sections">
+            <!-- Connection Status -->
+            <div class="panel-section">
+                <h3><i class="fa-solid fa-network-wired"></i> Connection Status</h3>
+                <div class="connection-info">
+                    <div class="info-row">
+                        <span class="info-label">Serial Port</span>
+                        <span class="info-value" id="imuSerialPort">--</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Baud Rate</span>
+                        <span class="info-value">115200</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Status</span>
+                        <span class="info-value" id="imuConnStatus">--</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Thruster Panel -->
+    <div class="sensor-panel" id="thrusterPanel">
+        <div class="panel-header">
+            <div class="panel-title">
+                <i class="fa-solid fa-anchor"></i>
+                <h2>Thruster Controller</h2>
+            </div>
+            <span class="status-badge large" id="thrusterStatusBadge">Checking...</span>
+        </div>
+
+        <div class="panel-sections">
+            <!-- Connection Status -->
+            <div class="panel-section">
+                <h3><i class="fa-solid fa-network-wired"></i> Connection Status</h3>
+                <div class="connection-info">
+                    <div class="info-row">
+                        <span class="info-label">IP Address</span>
+                        <span class="info-value">192.168.50.100</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Port</span>
+                        <span class="info-value">8888 (TCP)</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">TCP Status</span>
+                        <span class="info-value" id="thrusterTcpStatus">--</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Latency</span>
+                        <span class="info-value" id="thrusterLatencyValue">-- ms</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/sensors.js"></script>
+{% endblock %}

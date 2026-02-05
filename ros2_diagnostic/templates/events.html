@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}Event Logs - ROS2 System Diagnostic{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/static/css/events.css">
+{% endblock %}
+
+{% block content %}
+<main class="main-content">
+    <div class="page-header">
+        <h1><i class="fa-solid fa-clipboard-list"></i> Event Logs</h1>
+        <div class="page-actions">
+            <button id="refreshBtn" class="btn btn-primary">
+                <i class="fa-solid fa-sync"></i> Refresh
+            </button>
+            <button id="exportCsvBtn" class="btn btn-secondary">
+                <i class="fa-solid fa-file-csv"></i> Export CSV
+            </button>
+            <button id="exportJsonBtn" class="btn btn-secondary">
+                <i class="fa-solid fa-file-code"></i> Export JSON
+            </button>
+        </div>
+    </div>
+
+    <!-- Filters Section -->
+    <div class="card filters-card">
+        <div class="card-header">
+            <h3><i class="fa-solid fa-filter"></i> Filters</h3>
+            <button id="toggleFilters" class="btn-icon">
+                <i class="fa-solid fa-chevron-down"></i>
+            </button>
+        </div>
+        <div class="card-body filters-body">
+            <div class="filters-grid">
+                <div class="filter-group">
+                    <label for="eventTypeFilter">Event Type</label>
+                    <select id="eventTypeFilter" class="form-select">
+                        <option value="">All Types</option>
+                        <option value="system_start">System Start</option>
+                        <option value="ros2_start">ROS2 Start</option>
+                        <option value="ros2_stop">ROS2 Stop</option>
+                        <option value="rosbag_start">Rosbag Start</option>
+                        <option value="rosbag_stop">Rosbag Stop</option>
+                        <option value="alert_resolved">Alert Resolved</option>
+                        <option value="alert_ignored">Alert Ignored</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="actionFilter">Action</label>
+                    <select id="actionFilter" class="form-select">
+                        <option value="">All Actions</option>
+                        <option value="start">Start</option>
+                        <option value="stop">Stop</option>
+                        <option value="resolve">Resolve</option>
+                        <option value="ignore">Ignore</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="resourceFilter">Resource</label>
+                    <input id="resourceFilter" type="text" class="form-input" placeholder="e.g., ros2, rosbag">
+                </div>
+                <div class="filter-group">
+                    <label for="startDateFilter">Start Date</label>
+                    <input id="startDateFilter" type="datetime-local" class="form-input">
+                </div>
+                <div class="filter-group">
+                    <label for="endDateFilter">End Date</label>
+                    <input id="endDateFilter" type="datetime-local" class="form-input">
+                </div>
+                <div class="filter-group">
+                    <label for="successFilter">Status</label>
+                    <select id="successFilter" class="form-select">
+                        <option value="">All</option>
+                        <option value="true">Success</option>
+                        <option value="false">Failed</option>
+                    </select>
+                </div>
+                <div class="filter-group filter-actions">
+                    <label>&nbsp;</label>
+                    <div>
+                        <button id="applyFilters" class="btn btn-primary">Apply</button>
+                        <button id="clearFilters" class="btn btn-secondary">Clear</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon stat-icon-blue">
+                <i class="fa-solid fa-list"></i>
+            </div>
+            <div class="stat-content">
+                <div class="stat-value" id="totalEvents">-</div>
+                <div class="stat-label">Total Events</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon stat-icon-green">
+                <i class="fa-solid fa-check"></i>
+            </div>
+            <div class="stat-content">
+                <div class="stat-value" id="successfulEvents">-</div>
+                <div class="stat-label">Successful</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon stat-icon-red">
+                <i class="fa-solid fa-xmark"></i>
+            </div>
+            <div class="stat-content">
+                <div class="stat-value" id="failedEvents">-</div>
+                <div class="stat-label">Failed</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon stat-icon-purple">
+                <i class="fa-solid fa-clock"></i>
+            </div>
+            <div class="stat-content">
+                <div class="stat-value" id="last24hEvents">-</div>
+                <div class="stat-label">Last 24h</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Events Table -->
+    <div class="card events-table-card">
+        <div class="card-header">
+            <h3><i class="fa-solid fa-table"></i> Event Log</h3>
+            <div class="table-info">
+                <span id="eventsCount">Showing 0 events</span>
+            </div>
+        </div>
+        <div class="card-body table-body">
+            <div class="table-container">
+                <table class="events-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Timestamp</th>
+                            <th>Event Type</th>
+                            <th>Action</th>
+                            <th>Resource</th>
+                            <th>Message</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="eventsTableBody">
+                        <tr class="loading-row">
+                            <td colspan="7" class="text-center">
+                                <i class="fa-solid fa-spinner fa-spin"></i> Loading...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <!-- Pagination -->
+            <div class="pagination">
+                <button id="prevPage" class="btn btn-sm" disabled>
+                    <i class="fa-solid fa-chevron-left"></i> Previous
+                </button>
+                <span id="pageInfo">Page 1</span>
+                <button id="nextPage" class="btn btn-sm">
+                    Next <i class="fa-solid fa-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Event Detail Modal -->
+    <div id="eventDetailModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Event Details</h3>
+                <button class="modal-close" onclick="closeModal()">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Event details will be inserted here -->
+            </div>
+        </div>
+    </div>
+</main>
+
+<script src="/static/js/events.js?v=1"></script>
+{% endblock %}

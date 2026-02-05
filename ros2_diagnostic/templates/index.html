@@ -1,0 +1,606 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - ROS2 System Diagnostic{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Page Header -->
+    <div class="page-header">
+        <h1><i class="fa-solid fa-gauge-high"></i> System Dashboard</h1>
+        <p class="page-subtitle">Real-time overview of ROS2 system and sensors</p>
+    </div>
+
+    <!-- System Control Group -->
+    <div class="dashboard-group group-control">
+        <div class="group-header">
+            <i class="fa-solid fa-sliders"></i>
+            <h2>System Control</h2>
+        </div>
+        <div class="status-cards">
+            <!-- ROS2 Control Card -->
+            <div class="status-card control-card" id="ros2ControlCard">
+                <div class="card-header">
+                    <i class="fa-solid fa-power-off card-icon"></i>
+                    <span class="card-title">ROS2 Control</span>
+                </div>
+                <div class="card-body">
+                    <div class="control-status" id="ros2ControlStatus">
+                        <span class="status-indicator" id="ros2ControlIndicator"></span>
+                        <span class="control-status-text" id="ros2ControlStatusText">Checking...</span>
+                    </div>
+                    <div class="control-buttons">
+                        <button class="btn btn-success" id="startRos2Btn">
+                            <i class="fa-solid fa-play"></i> Start
+                        </button>
+                        <button class="btn btn-danger" id="stopRos2Btn" disabled>
+                            <i class="fa-solid fa-stop"></i> Stop
+                        </button>
+                    </div>
+                    <div class="control-detail" id="ros2ControlDetail">--</div>
+                </div>
+            </div>
+
+            <!-- Rosbag Recorder Card -->
+            <div class="status-card rosbag-card" id="rosbagCard">
+                <div class="card-header">
+                    <i class="fa-solid fa-film card-icon"></i>
+                    <span class="card-title">Rosbag Recorder</span>
+                    <button class="btn-icon-sm" id="rosbagRefreshBtn" title="Refresh status">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="rosbag-status" id="rosbagStatus">
+                        <span class="status-indicator" id="rosbagIndicator"></span>
+                        <span class="rosbag-status-text" id="rosbagStatusText">Checking...</span>
+                    </div>
+                    <div class="rosbag-info" id="rosbagInfo" style="display: none;">
+                        <div class="rosbag-detail">
+                            <span class="detail-label">File:</span>
+                            <span class="detail-value" id="rosbagFile">-</span>
+                        </div>
+                        <div class="rosbag-detail">
+                            <span class="detail-label">Duration:</span>
+                            <span class="detail-value" id="rosbagDuration">-</span>
+                        </div>
+                        <div class="rosbag-detail">
+                            <span class="detail-label">Topics:</span>
+                            <span class="detail-value" id="rosbagTopicCount">-</span>
+                        </div>
+                    </div>
+                    <div class="rosbag-buttons">
+                        <button class="btn btn-success" id="startRosbagBtn">
+                            <i class="fa-solid fa-circle"></i> Start
+                        </button>
+                        <button class="btn btn-danger" id="stopRosbagBtn" disabled>
+                            <i class="fa-solid fa-square"></i> Stop
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alert Monitoring Group -->
+    <div class="dashboard-group group-alert">
+        <div class="group-header">
+            <i class="fa-solid fa-bell"></i>
+            <h2>Alert Monitoring</h2>
+        </div>
+        <div class="status-cards">
+            <!-- Alert Panel Card -->
+            <div class="status-card alert-panel-card" id="alertPanelCard">
+                <div class="card-header">
+                    <i class="fa-solid fa-bell card-icon"></i>
+                    <span class="card-title">Active Alerts</span>
+                    <span class="alert-count" id="alertCount">0</span>
+                    <button class="btn-icon-sm" id="refreshAlertsBtn" onclick="refreshAlerts()" title="Refresh">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div id="activeAlertsList" class="alerts-list">
+                        <div class="no-alerts">No active alerts</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sensor Status Group -->
+    <div class="dashboard-group group-sensor">
+        <div class="group-header">
+            <i class="fa-solid fa-microchip"></i>
+            <h2>Sensor Status</h2>
+        </div>
+        <div class="status-cards">
+            <!-- Sensors Status Table Card -->
+            <div class="status-card sensors-table-card-full">
+                <div class="card-header">
+                    <i class="fa-solid fa-microchip card-icon"></i>
+                    <span class="card-title">Sensors Overview</span>
+                    <span class="status-count" id="sensorsCount">--</span>
+                    <button class="btn-icon-sm" id="refreshSensorsBtn" onclick="refreshSensors()" title="Refresh sensors">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>
+                </div>
+                <div class="card-body">
+                    <table class="sensors-table">
+                        <thead>
+                            <tr>
+                                <th>Sensor</th>
+                                <th>Connectivity</th>
+                                <th>Node</th>
+                                <th>Topic</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sensorsTableBody">
+                            <tr><td colspan="5" class="loading">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ROS2 Information Group -->
+    <div class="dashboard-group group-ros2">
+        <div class="group-header">
+            <i class="fa-solid fa-cubes"></i>
+            <h2>ROS2 Information</h2>
+        </div>
+        <div class="ros2-info">
+            <div class="info-card">
+                <div class="card-header">
+                    <h3><i class="fa-solid fa-cubes"></i> ROS2 Nodes</h3>
+                    <span class="count-badge" id="nodesCount">-- nodes</span>
+                </div>
+                <div class="card-body">
+                    <ul class="node-list" id="nodesList">
+                        <li class="loading">Loading nodes...</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="info-card">
+                <div class="card-header">
+                    <h3><i class="fa-solid fa-stream"></i> ROS2 Topics</h3>
+                    <span class="count-badge" id="topicsCount">-- topics</span>
+                </div>
+                <div class="card-body">
+                    <ul class="topic-list" id="topicsList">
+                        <li class="loading">Loading topics...</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sensor Proxy Links -->
+    <div class="dashboard-group group-proxy">
+        <div class="group-header">
+            <i class="fa-solid fa-network-wired"></i>
+            <h2>Sensor Proxy Links</h2>
+        </div>
+        <div class="proxy-links-container">
+            <a href="http://{{ wireless_ip }}:8081/" target="_blank" class="proxy-link" title="{{ wireless_ip }}:8081">
+                <i class="fa-solid fa-satellite-dish"></i>
+                <span>Uli LiDAR</span>
+            </a>
+            <a href="http://{{ wireless_ip }}:8082/" target="_blank" class="proxy-link" title="{{ wireless_ip }}:8082">
+                <i class="fa-solid fa-radar"></i>
+                <span>Navi LiDAR</span>
+            </a>
+            <a href="http://{{ wireless_ip }}:8083/" target="_blank" class="proxy-link" title="{{ wireless_ip }}:8083">
+                <i class="fa-solid fa-clock"></i>
+                <span>Time Machine</span>
+            </a>
+            <a href="http://{{ wireless_ip }}:8080/" target="_blank" class="proxy-link" title="{{ wireless_ip }}:8080">
+                <i class="fa-solid fa-info-circle"></i>
+                <span>Proxy Info</span>
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Chart Config -->
+<script>
+const CHART_CONFIG = {
+    colors: {
+        ok: '#10b981',
+        warning: '#f59e0b',
+        critical: '#ef4444',
+        unknown: '#6b7280',
+    },
+    refreshInterval: {{ refresh_interval or 2000 }}
+};
+</script>
+
+<style>
+/* Proxy Links Container */
+.proxy-links-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--spacing-md);
+}
+
+.proxy-link {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: white;
+    border-radius: var(--radius-lg);
+    text-decoration: none;
+    color: var(--gray-700);
+    box-shadow: var(--shadow-sm);
+    transition: all var(--transition-fast);
+    position: relative;
+    border: 1px solid var(--gray-200);
+}
+
+.proxy-link:hover {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+
+.proxy-link:hover i {
+    color: white;
+}
+
+.proxy-link i {
+    font-size: 1.25rem;
+    color: var(--primary);
+    transition: color var(--transition-fast);
+}
+
+.proxy-link span {
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+/* Show address as tooltip on hover */
+.proxy-link::after {
+    content: attr(title);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%) translateY(-8px);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: var(--gray-800);
+    color: white;
+    font-size: 0.75rem;
+    font-family: monospace;
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: all var(--transition-fast);
+    pointer-events: none;
+}
+
+.proxy-link:hover::after {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(-4px);
+}
+
+/* Sensors Table Styles */
+.sensors-table-card-full {
+    grid-column: 1 / -1;
+}
+
+.sensors-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.sensors-table th {
+    text-align: left;
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--gray-500);
+    border-bottom: 2px solid var(--gray-200);
+    vertical-align: middle;
+}
+
+/* Column-specific alignment */
+.sensors-table th:nth-child(1) { text-align: left; }  /* Sensor name */
+.sensors-table th:nth-child(2),
+.sensors-table th:nth-child(3),
+.sensors-table th:nth-child(4) { text-align: center; }  /* Connectivity, Node, Topic */
+.sensors-table th:nth-child(5) { text-align: center; }  /* Status */
+
+.sensors-table td {
+    padding: var(--spacing-md) var(--spacing-md);
+    border-bottom: 1px solid var(--gray-100);
+    font-size: 0.875rem;
+    vertical-align: middle;
+}
+
+/* Column-specific alignment for cells */
+.sensors-table td:nth-child(1) { text-align: left; }  /* Sensor name */
+.sensors-table td:nth-child(2),
+.sensors-table td:nth-child(3),
+.sensors-table td:nth-child(4) { text-align: center; }  /* Connectivity, Node, Topic */
+.sensors-table td:nth-child(5) { text-align: center; }  /* Status */
+
+.sensors-table tr:last-child td {
+    border-bottom: none;
+}
+
+.sensors-table .loading {
+    text-align: center;
+    color: var(--gray-500);
+    padding: var(--spacing-lg);
+}
+
+.status-icon {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: var(--spacing-sm);
+}
+
+.status-icon.ok { background: var(--success); }
+.status-icon.warning { background: var(--warning); }
+.status-icon.critical { background: var(--critical); }
+.status-icon.unknown { background: var(--gray-400); }
+
+.sensor-name {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.sensor-name i {
+    width: 16px;
+    text-align: center;
+    color: var(--primary);
+}
+
+/* Rosbag Card Styles */
+.rosbag-card {
+    position: relative;
+}
+
+.rosbag-card .btn-icon-sm {
+    position: absolute;
+    right: var(--spacing-md);
+    top: var(--spacing-md);
+    background: transparent;
+    border: none;
+    color: var(--gray-400);
+    cursor: pointer;
+    padding: var(--spacing-xs);
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-normal);
+}
+
+.rosbag-card .btn-icon-sm:hover {
+    background: var(--gray-100);
+    color: var(--primary);
+    transform: rotate(90deg);
+}
+
+.rosbag-status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md) 0;
+}
+
+.rosbag-status-text {
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.rosbag-info {
+    margin: var(--spacing-md) 0;
+    padding: var(--spacing-md);
+    background: linear-gradient(135deg, var(--gray-50) 0%, var(--gray-100) 100%);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--gray-200);
+}
+
+.rosbag-detail {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.875rem;
+    padding: var(--spacing-xs) 0;
+}
+
+.rosbag-detail .detail-label {
+    color: var(--gray-500);
+    font-weight: 500;
+}
+
+.rosbag-detail .detail-value {
+    font-weight: 600;
+    font-family: 'Courier New', monospace;
+    color: var(--gray-700);
+}
+
+.rosbag-buttons {
+    display: flex;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-md);
+}
+
+.rosbag-buttons .btn {
+    flex: 1;
+    font-size: 0.875rem;
+    padding: var(--spacing-sm) var(--spacing-md);
+}
+
+/* Alert Panel Styles */
+.alert-panel-card {
+    grid-column: span 1;
+}
+
+.alert-count {
+    background: linear-gradient(135deg, var(--gray-200) 0%, var(--gray-300) 100%);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    transition: all var(--transition-normal);
+}
+
+.alert-count.has-alerts {
+    background: linear-gradient(135deg, var(--critical) 0%, #ef4444 100%);
+    color: white;
+    box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3);
+}
+
+.alerts-list {
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+.alerts-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.alerts-list::-webkit-scrollbar-track {
+    background: var(--gray-100);
+    border-radius: 3px;
+}
+
+.alerts-list::-webkit-scrollbar-thumb {
+    background: var(--gray-300);
+    border-radius: 3px;
+}
+
+.alerts-list::-webkit-scrollbar-thumb:hover {
+    background: var(--gray-400);
+}
+
+.no-alerts {
+    text-align: center;
+    color: var(--gray-500);
+    padding: var(--spacing-xl) var(--spacing-md);
+    font-size: 0.875rem;
+}
+
+.alert-item {
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    border-radius: var(--radius-sm);
+    border-left: 4px solid;
+    background: var(--gray-50);
+    transition: all var(--transition-normal);
+}
+
+.alert-item:last-child {
+    margin-bottom: 0;
+}
+
+.alert-item.critical {
+    border-left-color: var(--critical);
+    background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+}
+
+.alert-item.warning {
+    border-left-color: var(--warning);
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+}
+
+.alert-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+}
+
+.alert-item.critical .alert-header i:first-child {
+    color: var(--critical);
+}
+
+.alert-item.warning .alert-header i:first-child {
+    color: var(--warning);
+}
+
+.alert-sensor {
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: var(--gray-800);
+}
+
+.alert-time {
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: var(--gray-500);
+}
+
+.alert-actions {
+    display: flex;
+    gap: var(--spacing-xs);
+    margin-left: var(--spacing-sm);
+}
+
+.btn-resolve,
+.btn-ignore {
+    background: transparent;
+    border: none;
+    color: var(--gray-400);
+    cursor: pointer;
+    padding: var(--spacing-xs);
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-normal);
+}
+
+.btn-resolve:hover {
+    color: var(--success);
+    background: var(--gray-200);
+}
+
+.btn-ignore:hover {
+    color: var(--warning);
+    background: var(--gray-200);
+}
+
+.alert-message {
+    font-size: 0.875rem;
+    margin-bottom: 0.25rem;
+    line-height: 1.4;
+}
+
+.alert-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    font-size: 0.75rem;
+    color: var(--gray-600);
+    padding-top: 0.25rem;
+}
+
+.alert-details .metric-label {
+    font-weight: 500;
+}
+
+.alert-details .metric-value {
+    color: var(--critical);
+    font-weight: 600;
+}
+
+.alert-details .metric-threshold {
+    color: var(--gray-500);
+}
+</style>
+{% endblock %}
+
+{% block extra_scripts %}
+<!-- Chart.js (only loaded on dashboard page) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js" defer></script>
+<script src="/static/js/alerts.js?v=2"></script>
+<script src="/static/js/dashboard.js?v=3"></script>
+{% endblock %}

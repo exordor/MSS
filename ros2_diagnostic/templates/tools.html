@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block title %}Diagnostic Tools - ROS2 System Diagnostic{% endblock %}
+
+{% block content %}
+<div class="tools-container">
+    <!-- Page Header -->
+    <div class="page-header">
+        <h1><i class="fa-solid fa-screwdriver-wrench"></i> Diagnostic Tools</h1>
+        <p class="page-subtitle">Interactive troubleshooting and verification tools</p>
+    </div>
+
+    <!-- Tools Grid -->
+    <div class="tools-grid">
+        <!-- Ping Tool -->
+        <div class="tool-card">
+            <div class="tool-header">
+                <div class="tool-icon">
+                    <i class="fa-solid fa-signal"></i>
+                </div>
+                <h3>Ping Test</h3>
+            </div>
+            <div class="tool-body">
+                <p class="tool-description">Test network connectivity to sensors and devices.</p>
+                <div class="tool-controls">
+                    <select id="pingTarget" class="tool-select">
+                        <option value="">Select target...</option>
+                        <option value="192.168.0.201">Navi LiDAR (192.168.0.201)</option>
+                        <option value="192.168.0.10">U-LiDAR (192.168.0.10)</option>
+                        <option value="192.168.0.11">Camera (192.168.0.11)</option>
+                        <option value="192.168.50.100">Thruster (192.168.50.100)</option>
+                        <option value="custom">Custom IP...</option>
+                    </select>
+                    <input type="text" id="pingCustomIp" class="tool-input" placeholder="Custom IP address" style="display: none;">
+                    <button class="tool-btn" onclick="runPingTest()">
+                        <i class="fa-solid fa-play"></i> Run Test
+                    </button>
+                </div>
+                <div class="tool-result" id="pingResult">
+                    <span class="result-placeholder">Results will appear here</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Topic Inspector -->
+        <div class="tool-card">
+            <div class="tool-header">
+                <div class="tool-icon">
+                    <i class="fa-solid fa-stream"></i>
+                </div>
+                <h3>Topic Inspector</h3>
+            </div>
+            <div class="tool-body">
+                <p class="tool-description">Inspect ROS2 topic details including type, QoS, and publishers/subscribers.</p>
+                <div class="tool-controls">
+                    <select id="topicSelect" class="tool-select">
+                        <option value="">Select topic...</option>
+                    </select>
+                    <button class="tool-btn" onclick="inspectTopic()">
+                        <i class="fa-solid fa-search"></i> Inspect
+                    </button>
+                </div>
+                <div class="tool-result" id="topicResult">
+                    <span class="result-placeholder">Select a topic to inspect</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Node Inspector -->
+        <div class="tool-card">
+            <div class="tool-header">
+                <div class="tool-icon">
+                    <i class="fa-solid fa-cubes"></i>
+                </div>
+                <h3>Node Inspector</h3>
+            </div>
+            <div class="tool-body">
+                <p class="tool-description">View ROS2 node details including subscriptions and publications.</p>
+                <div class="tool-controls">
+                    <select id="nodeSelect" class="tool-select">
+                        <option value="">Select node...</option>
+                    </select>
+                    <button class="tool-btn" onclick="inspectNode()">
+                        <i class="fa-solid fa-search"></i> Inspect
+                    </button>
+                </div>
+                <div class="tool-result" id="nodeResult">
+                    <span class="result-placeholder">Select a node to inspect</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Config Validator -->
+        <div class="tool-card">
+            <div class="tool-header">
+                <div class="tool-icon">
+                    <i class="fa-solid fa-file-code"></i>
+                </div>
+                <h3>Config Validator</h3>
+            </div>
+            <div class="tool-body">
+                <p class="tool-description">Validate YAML configuration files for syntax and required fields.</p>
+                <div class="tool-controls">
+                    <select id="configSelect" class="tool-select">
+                        <option value="all">All Configs</option>
+                        <option value="lidar">Navi LiDAR Config</option>
+                        <option value="camera">Camera Config</option>
+                        <option value="imu">IMU Config</option>
+                        <option value="thruster">Thruster Config</option>
+                    </select>
+                    <button class="tool-btn" onclick="validateConfig()">
+                        <i class="fa-solid fa-check"></i> Validate
+                    </button>
+                </div>
+                <div class="tool-result" id="configResult">
+                    <span class="result-placeholder">Validation results will appear here</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Commands -->
+        <div class="tool-card wide">
+            <div class="tool-header">
+                <div class="tool-icon">
+                    <i class="fa-solid fa-terminal"></i>
+                </div>
+                <h3>Quick Commands</h3>
+            </div>
+            <div class="tool-body">
+                <p class="tool-description">Execute common diagnostic commands.</p>
+                <div class="tool-controls">
+                    <button class="tool-btn small" onclick="runCommand('topics')">
+                        <i class="fa-solid fa-list"></i> List Topics
+                    </button>
+                    <button class="tool-btn small" onclick="runCommand('nodes')">
+                        <i class="fa-solid fa-cubes"></i> List Nodes
+                    </button>
+                    <button class="tool-btn small" onclick="runCommand('freq')">
+                        <i class="fa-solid fa-gauge"></i> Topic Hz
+                    </button>
+                    <button class="tool-btn small" onclick="runCommand('info')">
+                        <i class="fa-solid fa-info"></i> System Info
+                    </button>
+                </div>
+                <div class="tool-result wide" id="commandResult">
+                    <span class="result-placeholder">Command output will appear here</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/tools.js"></script>
+{% endblock %}

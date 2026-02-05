@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}System Logs - ROS2 System Diagnostic{% endblock %}
+
+{% block content %}
+<div class="logs-container" data-log-root="{{ log_root }}" data-project-root="{{ project_root }}">
+    <!-- Page Header -->
+    <div class="page-header">
+        <h1><i class="fa-solid fa-file-lines"></i> System Logs</h1>
+        <p class="page-subtitle">View application logs and ROS2 session logs</p>
+    </div>
+
+    <!-- Log Selector Panel -->
+    <div class="log-selector-panel">
+        <!-- Column 1: Category -->
+        <div class="selector-column">
+            <label>Log Category</label>
+            <div class="category-options" id="categoryOptions">
+                <label class="category-option">
+                    <input type="radio" name="logCategory" value="application" checked>
+                    <span>Application</span>
+                </label>
+                <label class="category-option">
+                    <input type="radio" name="logCategory" value="session">
+                    <span>ROS2 Session</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Column 2: Session/Source -->
+        <div class="selector-column">
+            <label>Session / Source</label>
+            <select id="sessionSelect" class="log-select-full" disabled>
+                <option value="">-- Select Category First --</option>
+            </select>
+            <div id="applicationInfo" class="source-info">
+                <small>Diagnostic & ROS2 control logs</small>
+            </div>
+        </div>
+
+        <!-- Column 3: Log File -->
+        <div class="selector-column">
+            <label>Log File</label>
+            <select id="fileSelect" class="log-select-full" disabled>
+                <option value="">-- Select Source First --</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Log Controls -->
+    <div class="log-controls">
+        <div class="control-group">
+            <label for="logSearch">Search:</label>
+            <input type="text" id="logSearch" class="log-input" placeholder="Filter logs...">
+        </div>
+
+        <div class="control-group">
+            <label for="logSeverity">Level:</label>
+            <select id="logSeverity" class="log-select">
+                <option value="">All</option>
+                <option value="DEBUG">DEBUG</option>
+                <option value="INFO">INFO</option>
+                <option value="WARN">WARN</option>
+                <option value="WARNING">WARNING</option>
+                <option value="ERROR">ERROR</option>
+                <option value="FATAL">FATAL</option>
+                <option value="CRITICAL">CRITICAL</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label for="logNode">Node:</label>
+            <input type="text" id="logNode" class="log-input" placeholder="Node name...">
+        </div>
+
+        <div class="control-group">
+            <label for="logLines">Lines:</label>
+            <select id="logLines" class="log-select">
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+                <option value="500">500</option>
+                <option value="1000">1000</option>
+                <option value="5000">5000</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <button id="loadLogsBtn" class="btn-primary">
+                <i class="fa-solid fa-refresh"></i> Refresh
+            </button>
+            <button id="autoRefreshLogsBtn" class="btn-secondary">
+                <i class="fa-solid fa-sync"></i> Auto: <span id="autoRefreshStatus">Off</span>
+            </button>
+            <button id="liveLogsBtn" class="btn-secondary">
+                <i class="fa-solid fa-bolt"></i> Live: <span id="liveStatus">Off</span>
+            </button>
+            <button id="clearLogsBtn" class="btn-secondary">
+                <i class="fa-solid fa-trash"></i> Clear
+            </button>
+        </div>
+    </div>
+
+    <!-- Log Stats -->
+    <div class="log-stats" id="logStats" style="display: none;">
+        <span class="log-stat"><i class="fa-solid fa-file"></i> <span id="logPath">-</span></span>
+        <span class="log-stat"><i class="fa-solid fa-list-ol"></i> <span id="logTotalLines">0</span> total lines</span>
+        <span class="log-stat"><i class="fa-solid fa-eye"></i> Showing <span id="logShownLines">0</span> lines</span>
+    </div>
+
+    <!-- Log Content -->
+    <div class="log-content-wrapper">
+        <pre id="logContent" class="log-content"><span class="log-placeholder">Select a log source to view</span></pre>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/logs.js"></script>
+{% endblock %}

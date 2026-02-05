@@ -1,0 +1,569 @@
+/**
+ * ROS2 System Diagnostic - Dashboard JavaScript
+ * WebSocket-based real-time updates
+ */
+
+// Sensor info configuration
+const SENSOR_INFO = {
+    navi_lidar: { name: 'Navi LiDAR', icon: 'fa-radar', nodePatterns: ['hesai', 'navi', 'lidar'] },
+    uli_lidar: { name: 'U-LiDAR', icon: 'fa-satellite-dish', nodePatterns: [] },
+    camera: { name: 'Camera', icon: 'fa-camera', nodePatterns: ['camera', 'galaxy', 'gmsl'] },
+    imu: { name: 'IMU', icon: 'fa-compass', nodePatterns: ['sbg', 'imu', 'ekf'] },
+    thruster: { name: 'Arduino (Thruster)', icon: 'fa-microchip', nodePatterns: ['thruster', 'pwm', 'motor'] },
+};
+
+// Sensor update tracking
+let sensorsLastUpdate = 0;
+let sensorsUpdateInterval = 5000; // 5 seconds (matching backend)
+
+// Local cache for sensor data (from WebSocket)
+let sensorsCache = {};
+let ros2NodesCache = [];
+let ros2TopicsCache = [];
+
+// ==========================================
+// Initialization
+// ==========================================
+
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('[Dashboard] DOMContentLoaded, initializing...');
+    initRosbagControls();
+    initSensorsTable();
+    initROS2Controls();
+});
+
+function initSensorsTable() {
+    const tableBody = document.getElementById('sensorsTableBody');
+    if (!tableBody) return;
+
+    const sensors = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster'];
+    let html = '';
+    for (const sensor of sensors) {
+        const info = SENSOR_INFO[sensor];
+        html += `
+            <tr id="row-${sensor}" data-sensor="${sensor}">
+                <td>
+                    <div class="sensor-name">
+                        <i class="fa-solid ${info.icon}"></i>
+                        <span>${info.name}</span>
+                    </div>
+                </td>
+                <td><span class="text-muted">--</span></td>
+                <td><span class="text-muted">--</span></td>
+                <td><span class="text-muted">--</span></td>
+                <td><span class="status-badge stopped">--</span></td>
+            </tr>
+        `;
+    }
+    tableBody.innerHTML = html;
+}
+
+// ==========================================
+// WebSocket Message Handlers
+// ==========================================
+
+// ==========================================
+// // Refresh Functions
+// // ==========================================
+
+async function refreshSensors() {
+    const btn = document.getElementById('refreshSensorsBtn');
+    const originalIcon = btn?.querySelector('i')?.className;
+
+    // Show spinning animation
+    if (btn) {
+        btn.querySelector('i').className = 'fa-solid fa-rotate fa-spin';
+    }
+
+    try {
+        // Fetch latest sensor status via HTTP (fallback)
+        const response = await fetch('/api/sensors/status');
+        const result = await response.json();
+
+        if (result.success) {
+            updateSensorsDisplay(result.data);
+            // Reset last update time
+            sensorsLastUpdate = Date.now();
+            updateSensorsLastUpdate();
+        }
+    } catch (error) {
+        console.error('Error refreshing sensors:', error);
+    } finally {
+        // Restore icon after short delay
+        setTimeout(() => {
+            if (btn) {
+                btn.querySelector('i').className = originalIcon || 'fa-solid fa-rotate';
+            }
+        }, 500);
+    }
+}
+
+function updateSensorsLastUpdate() {
+    // Update the last update time display in sensor card
+    const lastUpdateEl = document.getElementById('sensorsLastUpdate');
+    if (lastUpdateEl && sensorsLastUpdate > 0) {
+        const elapsed = Math.floor((Date.now() - sensorsLastUpdate) / 1000);
+        lastUpdateEl.textContent = `Updated ${elapsed}s ago`;
+    }
+}
+
+// Update elapsed time every second
+setInterval(updateSensorsLastUpdate, 1000);
+
+// Override main.js placeholder functions with actual implementations
+function updateSensorsDisplay(sensorsData) {
+    if (!sensorsData || !sensorsData.sensors) return;
+
+    const sensors = sensorsData.sensors;
+    const tableBody = document.getElementById('sensorsTableBody');
+    const countEl = document.getElementById('sensorsCount');
+
+    if (!tableBody) return;
+
+    // Update cache
+    sensorsCache = sensors;
+
+    // Track counts
+    const counts = { ok: 0, connected: 0, warning: 0, stopped: 0, disconnected: 0, critical: 0 };
+
+    // Update each sensor row
+    for (const [sensorName, sensorData] of Object.entries(sensors)) {
+        const status = sensorData.status || 'stopped';
+        // For thruster, use 'value' field (UDP heartbeat) instead of 'connected' (ping)
+        // For other sensors, use 'connected' field
+        const connected = sensorName === 'thruster'
+            ? (sensorData.value === 'Online')
+            : (sensorData.connected === 'Connected');
+
+        // Update counts
+        if (status === 'ok') counts.ok++;
+        else if (status === 'connected') counts.connected++;
+        else if (status === 'warning') counts.warning++;
+        else if (status === 'stopped') counts.stopped++;
+        else if (status === 'disconnected') counts.disconnected++;
+        else if (status === 'critical') counts.critical++;
+
+        // Check node availability from cached ROS2 nodes
+        // Node patterns for each sensor
+        const nodePatterns = {
+            navi_lidar: ['navi_lidar_driver', 'hesai', 'lidar'],
+            uli_lidar: ['uli_lidar', 'lidar'],
+            camera: ['galaxy_camera', 'camera'],
+            imu: ['sbg_device', 'imu', 'ekf'],
+            thruster: ['thruster_wifi_node', 'thruster'],
+        };
+
+        // Topic patterns for each sensor
+        const topicPatterns = {
+            navi_lidar: ['points', 'hesai'],
+            uli_lidar: ['points', 'uli'],
+            camera: ['image_raw', 'camera'],
+            imu: ['imu/data', 'sbg'],
+            thruster: ['thruster_status', 'thruster'],
+        };
+
+        // Use cached ROS2 data for node/topic detection
+        // Skip node/topic check for uli_lidar (no ROS driver)
+        let nodeAvailable = false;
+        let topicAvailable = false;
+        let showNodeTopic = sensorName !== 'uli_lidar';
+
+        if (showNodeTopic) {
+            if (ros2NodesCache && ros2NodesCache.length > 0) {
+                const patterns = nodePatterns[sensorName] || [];
+                nodeAvailable = ros2NodesCache.some(node =>
+                    patterns.some(pattern => node.toLowerCase().includes(pattern.toLowerCase()))
+                );
+            } else {
+                // Fallback to backend value
+                nodeAvailable = sensorData.node_available === true;
+            }
+
+            if (ros2TopicsCache && ros2TopicsCache.length > 0) {
+                const patterns = topicPatterns[sensorName] || [];
+                topicAvailable = ros2TopicsCache.some(topic =>
+                    patterns.some(pattern => topic.toLowerCase().includes(pattern.toLowerCase()))
+                );
+            } else {
+                // Fallback to backend value
+                topicAvailable = sensorData.topic_available === true;
+            }
+        }
+
+        const row = document.getElementById(`row-${sensorName}`);
+        if (row) {
+            const nodeCell = showNodeTopic ? getStatusIcon(nodeAvailable) : '<span class="text-muted">N/A</span>';
+            const topicCell = showNodeTopic ? getStatusIcon(topicAvailable) : '<span class="text-muted">N/A</span>';
+
+            row.innerHTML = `
+                <td>
+                    <div class="sensor-name">
+                        <i class="fa-solid ${SENSOR_INFO[sensorName].icon}"></i>
+                        <span>${SENSOR_INFO[sensorName].name}</span>
+                    </div>
+                </td>
+                <td>${getStatusIcon(connected)}</td>
+                <td>${nodeCell}</td>
+                <td>${topicCell}</td>
+                <td><span class="status-badge ${status}">${status.toUpperCase()}</span></td>
+            `;
+        }
+    }
+
+    // Update summary count
+    const okTotal = counts.ok;
+    const total = okTotal + counts.connected + counts.warning + counts.disconnected + counts.critical;
+    const stoppedCount = counts.stopped;
+
+    if (countEl) {
+        if (total > 0 || stoppedCount > 0) {
+            const allSensors = okTotal + counts.connected + counts.warning + counts.disconnected + counts.critical + stoppedCount;
+            countEl.textContent = `${okTotal}/${allSensors} OK`;
+            countEl.className = 'status-count ' + (
+                counts.critical > 0 || counts.disconnected > 0 ? 'critical' :
+                counts.warning > 0 ? 'warning' : 'ok'
+            );
+        } else {
+            countEl.textContent = '--';
+            countEl.className = 'status-count';
+        }
+    }
+}
+
+function updateROS2Display(ros2Data, ros2ControlData) {
+    // Update nodes list
+    if (ros2Data && ros2Data.nodes) {
+        ros2NodesCache = ros2Data.nodes;
+        updateNodesList(ros2Data);
+    }
+
+    // Update topics list
+    if (ros2Data && ros2Data.topics) {
+        ros2TopicsCache = ros2Data.topics;
+        updateTopicsList(ros2Data);
+    }
+
+    // Update ROS2 control status
+    if (ros2ControlData) {
+        updateROS2ControlStatusFromData(ros2ControlData);
+    }
+}
+
+function updateRosbagDisplay(rosbagData) {
+    if (!rosbagData) return;
+
+    const data = rosbagData;
+    const indicator = document.getElementById('rosbagIndicator');
+    const statusText = document.getElementById('rosbagStatusText');
+    const infoDiv = document.getElementById('rosbagInfo');
+    const fileEl = document.getElementById('rosbagFile');
+    const durationEl = document.getElementById('rosbagDuration');
+    const topicCountEl = document.getElementById('rosbagTopicCount');
+    const startBtn = document.getElementById('startRosbagBtn');
+    const stopBtn = document.getElementById('stopRosbagBtn');
+
+    if (data.is_recording || data.recording) {
+        // Recording state
+        if (indicator) {
+            indicator.className = 'status-indicator recording';
+            indicator.style.background = 'var(--success)';
+        }
+        if (statusText) {
+            statusText.textContent = 'Recording';
+            statusText.className = 'rosbag-status-text text-success';
+        }
+        if (fileEl) fileEl.textContent = data.current_bag || data.filename || 'Unknown';
+        if (durationEl) {
+            if (data.duration) {
+                const mins = Math.floor(data.duration / 60);
+                const secs = data.duration % 60;
+                durationEl.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            } else {
+                durationEl.textContent = '--:--';
+            }
+        }
+        if (topicCountEl) topicCountEl.textContent = data.topics_count || data.topic_count || 0;
+        if (infoDiv) infoDiv.style.display = 'block';
+        if (startBtn) {
+            startBtn.disabled = true;
+            startBtn.innerHTML = '<i class="fa-solid fa-circle"></i> Start';
+        }
+        if (stopBtn) {
+            stopBtn.disabled = false;
+            stopBtn.innerHTML = '<i class="fa-solid fa-square"></i> Stop';
+        }
+    } else {
+        // Idle state
+        if (indicator) {
+            indicator.className = 'status-indicator idle';
+            indicator.style.background = 'var(--gray-400)';
+        }
+        if (statusText) {
+            statusText.textContent = 'Idle';
+            statusText.className = 'rosbag-status-text text-muted';
+        }
+        if (startBtn) {
+            startBtn.disabled = false;
+            startBtn.innerHTML = '<i class="fa-solid fa-circle"></i> Start';
+        }
+        if (stopBtn) {
+            stopBtn.disabled = true;
+            stopBtn.innerHTML = '<i class="fa-solid fa-square"></i> Stop';
+        }
+
+        if (data.config_loaded || data.topic_count) {
+            if (topicCountEl) topicCountEl.textContent = data.topic_count || 0;
+            if (infoDiv) {
+                infoDiv.style.display = 'block';
+                if (fileEl) fileEl.textContent = '(not recording)';
+                if (durationEl) durationEl.textContent = '--:--';
+            }
+        } else {
+            if (infoDiv) infoDiv.style.display = 'none';
+        }
+    }
+}
+
+// ==========================================
+// Nodes/Topics List Update (from WebSocket data)
+// ==========================================
+
+function updateNodesList(ros2Data) {
+    const listEl = document.getElementById('nodesList');
+    const countEl = document.getElementById('nodesCount');
+
+    if (!listEl) return;
+
+    const nodes = ros2Data.nodes || [];
+    countEl.textContent = nodes.length + ' nodes';
+
+    if (nodes.length === 0) {
+        listEl.innerHTML = '<li class="text-muted">No nodes running</li>';
+    } else {
+        listEl.innerHTML = nodes.slice(0, 10).map(node =>
+            `<li>${escapeHtml(node)}</li>`
+        ).join('');
+
+        if (nodes.length > 10) {
+            listEl.innerHTML += `<li class="text-muted">... and ${nodes.length - 10} more</li>`;
+        }
+    }
+}
+
+function updateTopicsList(ros2Data) {
+    const listEl = document.getElementById('topicsList');
+    const countEl = document.getElementById('topicsCount');
+
+    if (!listEl) return;
+
+    const topics = ros2Data.topics || [];
+    countEl.textContent = topics.length + ' topics';
+
+    if (topics.length === 0) {
+        listEl.innerHTML = '<li class="text-muted">No topics found</li>';
+    } else {
+        const importantTopics = [
+            '/navi_lidar/points',
+            '/uli_lidar/points',
+            '/image_raw',
+            '/imu/data',
+            '/thruster_status_pwm',
+        ];
+
+        const sortedTopics = topics.sort((a, b) => {
+            const aImportant = importantTopics.some(t => a.includes(t));
+            const bImportant = importantTopics.some(t => b.includes(t));
+            return bImportant - aImportant;
+        });
+
+        listEl.innerHTML = sortedTopics.slice(0, 15).map(topic =>
+            `<li>${escapeHtml(topic)}</li>`
+        ).join('');
+
+        if (topics.length > 15) {
+            listEl.innerHTML += `<li class="text-muted">... and ${topics.length - 15} more</li>`;
+        }
+    }
+}
+
+// ==========================================
+// Rosbag Recording Control
+// ==========================================
+
+function initRosbagControls() {
+    const startBtn = document.getElementById('startRosbagBtn');
+    const stopBtn = document.getElementById('stopRosbagBtn');
+    const refreshBtn = document.getElementById('rosbagRefreshBtn');
+
+    if (startBtn) {
+        startBtn.addEventListener('click', startRosbagRecording);
+    }
+    if (stopBtn) {
+        stopBtn.addEventListener('click', stopRosbagRecording);
+    }
+    if (refreshBtn) {
+        // NOTE: HTTP polling removed - rosbag status updates via WebSocket every 5 seconds
+        // The refresh button now only provides visual feedback for user action
+        refreshBtn.addEventListener('click', () => {
+            refreshBtn.querySelector('i').classList.add('fa-spin');
+            setTimeout(() => {
+                refreshBtn.querySelector('i').classList.remove('fa-spin');
+            }, 500);
+        });
+    }
+}
+
+async function startRosbagRecording() {
+    const startBtn = document.getElementById('startRosbagBtn');
+    const originalText = startBtn.innerHTML;
+
+    startBtn.disabled = true;
+    startBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Starting...';
+
+    try {
+        const result = await API.rosbag.start();
+
+        if (result.success) {
+            showNotification('success', result.message || 'Recording started');
+        } else {
+            showNotification('error', 'Failed to start recording: ' + (result.message || 'Unknown error'));
+            startBtn.disabled = false;
+            startBtn.innerHTML = originalText;
+        }
+    } catch (error) {
+        console.error('Error starting rosbag:', error);
+        showNotification('error', 'Error starting recording: ' + error.message);
+        startBtn.disabled = false;
+        startBtn.innerHTML = originalText;
+    }
+}
+
+async function stopRosbagRecording() {
+    const stopBtn = document.getElementById('stopRosbagBtn');
+    const originalText = stopBtn.innerHTML;
+
+    stopBtn.disabled = true;
+    stopBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Stopping...';
+
+    try {
+        const result = await API.rosbag.stop();
+
+        if (result.success) {
+            showNotification('success', result.message || 'Recording stopped');
+        } else {
+            showNotification('error', 'Failed to stop recording: ' + (result.message || 'Unknown error'));
+            stopBtn.disabled = false;
+            stopBtn.innerHTML = originalText;
+        }
+    } catch (error) {
+        console.error('Error stopping rosbag:', error);
+        showNotification('error', 'Error stopping recording: ' + error.message);
+        stopBtn.disabled = false;
+        stopBtn.innerHTML = originalText;
+    }
+}
+
+// ==========================================
+// ROS2 Control Functions
+// ==========================================
+
+function initROS2Controls() {
+    const startBtn = document.getElementById('startRos2Btn');
+    const stopBtn = document.getElementById('stopRos2Btn');
+
+    if (startBtn) {
+        startBtn.addEventListener('click', startROS2);
+    }
+    if (stopBtn) {
+        stopBtn.addEventListener('click', stopROS2);
+    }
+}
+
+function updateROS2ControlStatusFromData(status) {
+    const indicator = document.getElementById('ros2ControlIndicator');
+    const statusText = document.getElementById('ros2ControlStatusText');
+    const detailEl = document.getElementById('ros2ControlDetail');
+    const startBtn = document.getElementById('startRos2Btn');
+    const stopBtn = document.getElementById('stopRos2Btn');
+
+    if (indicator) {
+        indicator.className = 'status-indicator ' + (status.running ? 'ok' : 'unknown');
+    }
+    if (statusText) {
+        statusText.textContent = status.running ? 'Running' : 'Stopped';
+    }
+    if (detailEl) {
+        detailEl.textContent = status.running ?
+            `PID: ${status.pid || 'Unknown'}` : 'ROS2 drivers stopped';
+    }
+    if (startBtn && stopBtn) {
+        startBtn.disabled = status.running;
+        stopBtn.disabled = !status.running;
+    }
+}
+
+async function startROS2() {
+    const startBtn = document.getElementById('startRos2Btn');
+    const statusText = document.getElementById('ros2ControlStatusText');
+
+    startBtn.disabled = true;
+    if (statusText) statusText.textContent = 'Starting...';
+
+    try {
+        const result = await API.ros2.control.start();
+
+        if (result.success) {
+            showNotification('success', result.message || 'ROS2 starting...');
+        } else {
+            showNotification('error', 'Failed to start ROS2: ' + (result.message || 'Unknown error'));
+            startBtn.disabled = false;
+            if (statusText) statusText.textContent = 'Start Failed';
+        }
+    } catch (error) {
+        console.error('Error starting ROS2:', error);
+        showNotification('error', 'Error starting ROS2: ' + error.message);
+        startBtn.disabled = false;
+        if (statusText) statusText.textContent = 'Error';
+    }
+}
+
+async function stopROS2() {
+    const stopBtn = document.getElementById('stopRos2Btn');
+    const statusText = document.getElementById('ros2ControlStatusText');
+
+    stopBtn.disabled = true;
+    if (statusText) statusText.textContent = 'Stopping...';
+
+    try {
+        const result = await API.ros2.control.stop();
+
+        if (result.success) {
+            showNotification('success', result.message || 'ROS2 stopped');
+        } else {
+            showNotification('error', 'Failed to stop ROS2: ' + (result.message || 'Unknown error'));
+            stopBtn.disabled = false;
+            if (statusText) statusText.textContent = 'Stop Failed';
+        }
+    } catch (error) {
+        console.error('Error stopping ROS2:', error);
+        showNotification('error', 'Error stopping ROS2: ' + error.message);
+        stopBtn.disabled = false;
+        if (statusText) statusText.textContent = 'Error';
+    }
+}
+
+// ==========================================
+// Utility Functions
+// ==========================================
+
+function getStatusIcon(isOk) {
+    if (isOk === true) {
+        return '<span class="status-icon ok"></span><span class="text-success">OK</span>';
+    } else if (isOk === false) {
+        return '<span class="status-icon critical"></span><span class="text-danger">--</span>';
+    } else {
+        return '<span class="text-muted">N/A</span>';
+    }
+}
+
+// escapeHtml and showNotification are now in main.js to avoid duplication
