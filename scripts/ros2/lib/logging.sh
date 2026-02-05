@@ -245,7 +245,7 @@ extract_node_log() {
   # If no matches with node name, try executable name
   if [[ ! -s "${extracted_log}" ]]; then
     # Try to find logs by executable name patterns
-    grep -E "\[(hesai_ros_driver_node|hesai)" "${master_log}" > "${extracted_log}" 2>/dev/null || true
+    grep -E "\[(hesai_ros_driver_node|hesai|battery_monitor_node)" "${master_log}" > "${extracted_log}" 2>/dev/null || true
   fi
 
   echo "${extracted_log}"
@@ -265,6 +265,11 @@ start_node_log_extractor() {
   # Special case for navi_lidar_driver - the actual executable is hesai_ros_driver_node
   if [[ "${node_name}" == "navi_lidar_driver" ]]; then
     log_pattern="hesai_ros_driver_node"
+  fi
+
+  # Special case for battery_monitor - the actual executable is battery_monitor_node
+  if [[ "${node_name}" == "battery_monitor" ]]; then
+    log_pattern="battery_monitor_node"
   fi
 
   # Start background process to monitor and extract
