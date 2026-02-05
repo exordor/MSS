@@ -1,0 +1,18 @@
+# 本地日志配置覆盖模板
+# 复制此文件为 local.yaml 并根据需要修改
+# 使用方法: ./run_ros2_camera.sh --log-config config/logging/local.yaml
+
+default_profile: dev
+
+profiles:
+  # 自定义本地开发配置
+  local:
+    rcutils:
+      use_stdout: 1
+      colorized_output: 1
+      console_output_format: '[{time}] [{severity}] [{name}] {message}'
+      buffered_stream: 0
+      log_level: debug
+    python:
+      unbuffered: 1
+      verbose: 0
