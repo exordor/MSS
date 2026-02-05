@@ -34,35 +34,49 @@ public:
   UdpClient() = default;
   ~UdpClient() { close(); }
 
-  // Dual-port architecture:
-  // - Send commands to Arduino:8888
-  // - Receive data (S/F) on local data_port (28888)
-  // - Receive heartbeat on local heartbeat_port (28887)
-  bool bind(const std::string & arduino_host, int arduino_port, int data_port, int heartbeat_port)
+  // Three-port architecture:
+  // - Send commands to Arduino:8888 (C <left> <right>)
+  // - Send PING to Arduino:8889, receive broadcast heartbeat on local 8889
+  // - Receive unicast data (S/F) on local data_port (28888)
+  bool bind(const std::string & arduino_host, int arduino_cmd_port, int arduino_ping_port,
+            int data_port, int heartbeat_port)
   {
     close();
     last_error_.clear();
 
     // Store port numbers
-    arduino_port_ = arduino_port;
+    arduino_cmd_port_ = arduino_cmd_port;
+    arduino_ping_port_ = arduino_ping_port;
     data_port_ = data_port;
     heartbeat_port_ = heartbeat_port;
 
-    // Resolve Arduino address for sending commands
+    // Resolve Arduino address for sending commands (port 8888)
     struct addrinfo hints;
     std::memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_DGRAM;
 
     struct addrinfo * result = nullptr;
-    const std::string port_str = std::to_string(arduino_port);
-    int rc = ::getaddrinfo(arduino_host.c_str(), port_str.c_str(), &hints, &result);
+    const std::string cmd_port_str = std::to_string(arduino_cmd_port);
+    int rc = ::getaddrinfo(arduino_host.c_str(), cmd_port_str.c_str(), &hints, &result);
     if (rc != 0) {
       last_error_ = ::gai_strerror(rc);
       return false;
     }
-    std::memcpy(&arduino_addr_, result->ai_addr, result->ai_addrlen);
-    arduino_addrlen_ = result->ai_addrlen;
+    std::memcpy(&arduino_cmd_addr_, result->ai_addr, result->ai_addrlen);
+    arduino_cmd_addrlen_ = result->ai_addrlen;
+    ::freeaddrinfo(result);
+
+    // Resolve Arduino address for sending PING (port 8889)
+    result = nullptr;
+    const std::string ping_port_str = std::to_string(arduino_ping_port);
+    rc = ::getaddrinfo(arduino_host.c_str(), ping_port_str.c_str(), &hints, &result);
+    if (rc != 0) {
+      last_error_ = ::gai_strerror(rc);
+      return false;
+    }
+    std::memcpy(&arduino_ping_addr_, result->ai_addr, result->ai_addrlen);
+    arduino_ping_addrlen_ = result->ai_addrlen;
     ::freeaddrinfo(result);
 
     // Create data socket and bind to data port (receives S, F messages)
@@ -71,11 +85,20 @@ public:
       return false;
     }
 
-    // Create heartbeat socket and bind to heartbeat port (receives HEARTBEAT)
+    // Create heartbeat socket and bind to heartbeat port (receives unicast HEARTBEAT)
     heartbeat_sock_ = createSocket(heartbeat_port);
     if (heartbeat_sock_ < 0) {
       close();
       last_error_ = "Failed to bind heartbeat socket";
+      return false;
+    }
+
+    // Create PING socket, bind to local port 8889 to receive broadcast heartbeat
+    // Also used to send PING to Arduino:8889
+    ping_sock_ = createSocket(arduino_ping_port);
+    if (ping_sock_ < 0) {
+      close();
+      last_error_ = "Failed to bind ping socket";
       return false;
     }
 
@@ -93,16 +116,21 @@ public:
       ::close(heartbeat_sock_);
       heartbeat_sock_ = -1;
     }
+    if (ping_sock_ >= 0) {
+      ::close(ping_sock_);
+      ping_sock_ = -1;
+    }
     buffer_.clear();
   }
 
-  bool isConnected() const { return data_sock_ >= 0 && heartbeat_sock_ >= 0; }
+  bool isConnected() const { return data_sock_ >= 0 && heartbeat_sock_ >= 0 && ping_sock_ >= 0; }
 
   const std::string & lastError() const { return last_error_; }
   int getDataPort() const { return data_port_; }
   int getHeartbeatPort() const { return heartbeat_port_; }
+  int getPingPort() const { return arduino_ping_port_; }
 
-  // Send command to Arduino
+  // Send command to Arduino (port 8888)
   bool sendCommand(const std::string & line)
   {
     if (data_sock_ < 0) {
@@ -116,7 +144,7 @@ public:
     }
 
     ssize_t sent = ::sendto(data_sock_, payload.data(), payload.size(), 0,
-                            reinterpret_cast<const struct sockaddr *>(&arduino_addr_), arduino_addrlen_);
+                            reinterpret_cast<const struct sockaddr *>(&arduino_cmd_addr_), arduino_cmd_addrlen_);
 
     if (sent < 0) {
       last_error_ = std::strerror(errno);
@@ -130,12 +158,38 @@ public:
     return true;
   }
 
-  // Read from both sockets (data and heartbeat)
+  // Send PING to Arduino (port 8889)
+  bool sendPing()
+  {
+    if (ping_sock_ < 0) {
+      last_error_ = "ping socket closed";
+      return false;
+    }
+
+    const std::string payload = "PING\n";
+
+    ssize_t sent = ::sendto(ping_sock_, payload.data(), payload.size(), 0,
+                            reinterpret_cast<const struct sockaddr *>(&arduino_ping_addr_), arduino_ping_addrlen_);
+
+    if (sent < 0) {
+      last_error_ = std::strerror(errno);
+      return false;
+    }
+    if (static_cast<size_t>(sent) != payload.size()) {
+      last_error_ = "partial send";
+      return false;
+    }
+
+    return true;
+  }
+
+  // Read from all three sockets (data, heartbeat, ping)
   bool readLines(std::vector<std::string> & lines)
   {
     bool read_any = false;
     read_any |= readFromSocket(data_sock_, buffer_, lines);
     read_any |= readFromSocket(heartbeat_sock_, buffer_, lines);
+    read_any |= readFromSocket(ping_sock_, buffer_, lines);
     return read_any;
   }
 
@@ -228,15 +282,21 @@ private:
 
   int data_sock_{-1};
   int heartbeat_sock_{-1};
+  int ping_sock_{-1};
   int data_port_{0};
   int heartbeat_port_{0};
-  int arduino_port_{0};
+  int arduino_cmd_port_{0};
+  int arduino_ping_port_{0};
   std::string buffer_;
   std::string last_error_;
 
-  // Arduino address
-  struct sockaddr_storage arduino_addr_;
-  socklen_t arduino_addrlen_{0};
+  // Arduino command address (port 8888)
+  struct sockaddr_storage arduino_cmd_addr_;
+  socklen_t arduino_cmd_addrlen_{0};
+
+  // Arduino PING address (port 8889)
+  struct sockaddr_storage arduino_ping_addr_;
+  socklen_t arduino_ping_addrlen_{0};
 };
 
 class ThrusterWifiNode : public rclcpp::Node
@@ -250,9 +310,10 @@ public:
   {
     // Network parameters
     host_ = declare_parameter<std::string>("host", "192.168.50.100");
-    arduino_port_ = declare_parameter<int>("arduino_port", 8888);         // Arduino listening port (commands)
-    data_port_ = declare_parameter<int>("data_port", 28888);             // Local data port (receives S, F)
-    heartbeat_port_ = declare_parameter<int>("heartbeat_port", 28887);   // Local heartbeat port
+    arduino_cmd_port_ = declare_parameter<int>("arduino_cmd_port", 8888);   // Arduino command port (C <left> <right>)
+    arduino_ping_port_ = declare_parameter<int>("arduino_ping_port", 8889); // Arduino PING port (PING/heartbeat)
+    data_port_ = declare_parameter<int>("data_port", 28888);               // Local data port (receives S, F)
+    heartbeat_port_ = declare_parameter<int>("heartbeat_port", 28887);     // Local heartbeat port
     udp_timeout_ = declare_parameter<double>("udp_timeout", 5.0);
     read_period_ = std::chrono::duration<double>(declare_parameter<double>("read_interval", 0.05));
     reconnect_delay_ = std::chrono::duration<double>(declare_parameter<double>("reconnect_delay", 2.0));
@@ -293,6 +354,9 @@ public:
     // Timer
     timer_ = create_wall_timer(read_period_, std::bind(&ThrusterWifiNode::onTimer, this));
 
+    // PING timer (1Hz)
+    ping_timer_ = create_wall_timer(std::chrono::seconds(1), std::bind(&ThrusterWifiNode::onPingTimer, this));
+
     // Initialize timing
     next_reconnect_time_ = std::chrono::steady_clock::now();
     last_udp_receive_ = std::chrono::steady_clock::time_point();
@@ -301,7 +365,8 @@ public:
     stats_.stats_start = std::chrono::steady_clock::now();
 
     logInfo("Thruster WiFi Node initialized");
-    logInfo("Arduino: " + host_ + ":" + std::to_string(arduino_port_));
+    logInfo("Arduino command: " + host_ + ":" + std::to_string(arduino_cmd_port_));
+    logInfo("Arduino PING: " + host_ + ":" + std::to_string(arduino_ping_port_) + " (local port: " + std::to_string(arduino_ping_port_) + ")");
     logInfo("Local data port: " + std::to_string(data_port_) + ", heartbeat port: " + std::to_string(heartbeat_port_));
     logInfo("Log level: " + log_level_);
   }
@@ -461,10 +526,11 @@ private:
     next_reconnect_time_ = std::chrono::steady_clock::now() +
       std::chrono::duration_cast<std::chrono::steady_clock::duration>(current_delay);
 
-    if (client_.bind(host_, arduino_port_, data_port_, heartbeat_port_)) {
+    if (client_.bind(host_, arduino_cmd_port_, arduino_ping_port_, data_port_, heartbeat_port_)) {
       logInfo("UDP sockets bound - data:" + std::to_string(data_port_) +
               ", heartbeat:" + std::to_string(heartbeat_port_) +
-              " for Arduino at " + host_ + ":" + std::to_string(arduino_port_));
+              ", ping:" + std::to_string(arduino_ping_port_) +
+              " for Arduino at " + host_ + ":" + std::to_string(arduino_cmd_port_));
       consecutive_failures_ = 0;
       reconnect_count_++;
 
@@ -547,7 +613,7 @@ private:
     std::vector<std::string> lines;
     const auto now = std::chrono::steady_clock::now();
 
-    // Read from single socket (all data: S status, F flow, PONG)
+    // Read from all sockets (data: S status, F flow, HEARTBEAT from ping_sock)
     if (client_.readLines(lines)) {
       // Update last receive time if any data was received
       last_udp_receive_ = now;
@@ -601,7 +667,7 @@ private:
           }
         }
       }
-      // Check for heartbeat
+      // Check for heartbeat (from broadcast on port 8889 or unicast)
       else if (line == "HEARTBEAT") {
         stats_.rx_heartbeat++;
         if (log_heartbeat_) {
@@ -611,6 +677,22 @@ private:
         stats_.parse_errors++;
         logDebug("Unknown message: " + line);
       }
+    }
+  }
+
+  void onPingTimer()
+  {
+    if (!client_.isConnected()) {
+      return;
+    }
+
+    if (client_.sendPing()) {
+      stats_.tx_ping++;
+      if (log_command_) {
+        logDebug("TX PING");
+      }
+    } else {
+      logError("Failed to send PING: " + std::string(client_.lastError()));
     }
   }
 
@@ -677,6 +759,7 @@ private:
   struct Stats
   {
     uint64_t tx_packets{0};
+    uint64_t tx_ping{0};
     uint64_t rx_packets{0};
     uint64_t rx_heartbeat{0};
     uint64_t rx_status{0};
@@ -688,7 +771,7 @@ private:
 
     void reset()
     {
-      tx_packets = rx_packets = rx_heartbeat = rx_status = rx_speed = 0;
+      tx_packets = tx_ping = rx_packets = rx_heartbeat = rx_status = rx_speed = 0;
       parse_errors = timeouts = 0;
       bytes_received = 0;
       stats_start = std::chrono::steady_clock::now();
@@ -793,7 +876,8 @@ private:
 
   // Network configuration
   std::string host_;
-  int arduino_port_{};
+  int arduino_cmd_port_{};
+  int arduino_ping_port_{};
   int data_port_{};
   int heartbeat_port_{};
   double udp_timeout_{};
@@ -828,6 +912,7 @@ private:
 
   // Timer
   rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::TimerBase::SharedPtr ping_timer_;
 
   // Timing state
   std::chrono::steady_clock::time_point next_reconnect_time_;
