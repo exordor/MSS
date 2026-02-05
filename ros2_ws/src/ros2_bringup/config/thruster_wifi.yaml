@@ -1,11 +1,30 @@
 thruster_wifi_node:
   ros__parameters:
+    # Network settings
     host: "192.168.50.100"
-    port: 8888
-    connect_timeout: 5.0
+    arduino_port: 8888         # Arduino listening port (commands)
+    data_port: 28888           # Local data port (receives S, F)
+    heartbeat_port: 28887      # Local heartbeat port
+    udp_timeout: 5.0           # Data timeout
     read_interval: 0.05
     reconnect_delay: 2.0
-    max_reconnect_delay: 60.0  # Maximum delay between reconnection attempts
+    max_reconnect_delay: 60.0
     stop_cmd: "C 1500 1500"
     status_frame_id: "thruster_link"
-    handshake: "HELLO"
+
+    # Logging configuration
+    log_level: "INFO"              # DEBUG, INFO, WARN, ERROR
+    enable_heartbeat_log: true
+    enable_command_log: true
+    enable_status_log: false       # High frequency - disable by default
+    enable_speed_log: false        # High frequency - disable by default
+    log_to_file: false
+    log_file_path: "/tmp/thruster_wifi.log"
+    max_log_file_size_mb: 10
+
+    # Metrics publishing
+    metrics_publish_rate: 1.0      # Hz
+
+    # Keep-alive (send PING periodically to maintain connection)
+    keep_alive_interval: 1.0       # Seconds between keep-alive PINGs
+    ping_max_missed: 5             # Max consecutive PONG misses before declaring offline

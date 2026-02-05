@@ -29,4 +29,5 @@ topics:
   - /sbg/utc_time
   - /thruster_status_pwm
   - /thruster_command_pwm
+  - /battery_voltage
 output: ros2_bringup_all
