@@ -19,6 +19,7 @@ DEFAULT_CAMERA_CONFIG="${REPO_ROOT}/config/camera/ros2.yaml"
 DEFAULT_IMU_CONFIG="${REPO_ROOT}/config/imu/sbg_ros2.yaml"
 DEFAULT_THRUSTER_CONFIG="${REPO_ROOT}/config/thruster/thruster_wifi.yaml"
 DEFAULT_BAG_CONFIG="${REPO_ROOT}/config/rosbag/rosbag_ros2.yaml"
+DEFAULT_BATTERY_CONFIG="${REPO_ROOT}/config/battery/battery.yaml"
 DEFAULT_ZDA_CONFIG="${REPO_ROOT}/config/ptp/zda_publisher.yaml"
 DEFAULT_RECORDER_CONFIG="${REPO_ROOT}/config/recorder/recorder_ros2.yaml"
 DEFAULT_COMPRESSOR_CONFIG="${REPO_ROOT}/config/compressor/compressor_ros2.yaml"
@@ -33,6 +34,7 @@ Options:
   --imu-config PATH       Override IMU config (default: config/imu/sbg_ros2.yaml)
   --thruster-config PATH  Override thruster config (default: config/thruster/thruster_wifi.yaml)
   --bag-config PATH       Override rosbag topics/output YAML (default: config/rosbag/rosbag_ros2.yaml)
+  --battery-config PATH   Override battery monitor config (default: config/battery/battery.yaml)
   --zda-config PATH       Override ZDA publisher config (default: config/ptp/zda_publisher.yaml)
   --recorder-config PATH  Override recorder config (default: config/recorder/recorder_ros2.yaml)
   --compressor-config PATH Override compressor config (default: config/compressor/compressor_ros2.yaml)
@@ -57,6 +59,7 @@ CAMERA_CONFIG=""
 IMU_CONFIG=""
 THRUSTER_CONFIG=""
 BAG_CONFIG=""
+BATTERY_CONFIG=""
 ZDA_CONFIG=""
 RECORDER_CONFIG=""
 COMPRESSOR_CONFIG=""
@@ -76,6 +79,7 @@ while (($#)); do
     --imu-config) shift; IMU_CONFIG="$1"; shift;;
     --thruster-config) shift; THRUSTER_CONFIG="$1"; shift;;
     --bag-config) shift; BAG_CONFIG="$1"; shift;;
+    --battery-config) shift; BATTERY_CONFIG="$1"; shift;;
     --zda-config) shift; ZDA_CONFIG="$1"; shift;;
     --recorder-config) shift; RECORDER_CONFIG="$1"; shift;;
     --compressor-config) shift; COMPRESSOR_CONFIG="$1"; shift;;
@@ -136,13 +140,14 @@ CAMERA_CONFIG="${CAMERA_CONFIG:-${DEFAULT_CAMERA_CONFIG}}"
 IMU_CONFIG="${IMU_CONFIG:-${DEFAULT_IMU_CONFIG}}"
 THRUSTER_CONFIG="${THRUSTER_CONFIG:-${DEFAULT_THRUSTER_CONFIG}}"
 BAG_CONFIG="${BAG_CONFIG:-${DEFAULT_BAG_CONFIG}}"
+BATTERY_CONFIG="${BATTERY_CONFIG:-${DEFAULT_BATTERY_CONFIG}}"
 ZDA_CONFIG="${ZDA_CONFIG:-${DEFAULT_ZDA_CONFIG}}"
 RECORDER_CONFIG="${RECORDER_CONFIG:-${DEFAULT_RECORDER_CONFIG}}"
 COMPRESSOR_CONFIG="${COMPRESSOR_CONFIG:-${DEFAULT_COMPRESSOR_CONFIG}}"
 COMPRESSOR_INPUT="${COMPRESSOR_INPUT:-/navi_lidar/points}"
 COMPRESSOR_OUTPUT="${COMPRESSOR_OUTPUT:-/points_downsampled}"
 
-for cfg in "$LIDAR_CONFIG" "$CAMERA_CONFIG" "$IMU_CONFIG" "$THRUSTER_CONFIG" "$RECORDER_CONFIG" "$COMPRESSOR_CONFIG"; do
+for cfg in "$LIDAR_CONFIG" "$CAMERA_CONFIG" "$IMU_CONFIG" "$THRUSTER_CONFIG" "$BATTERY_CONFIG" "$RECORDER_CONFIG" "$COMPRESSOR_CONFIG"; do
   if [[ ! -f "$cfg" ]]; then
     echo "Config file not found: $cfg" >&2
     exit 1
@@ -172,7 +177,7 @@ set -u
 # =============================================================================
 # Cleanup any orphaned ROS 2 node processes to avoid duplicate node warnings
 # =============================================================================
-for node in "sbg_device" "galaxy_camera" "hesai_ros_driver_node" "thruster_wifi_node" "recorder_node"; do
+for node in "sbg_device" "galaxy_camera" "hesai_ros_driver_node" "battery_monitor" "thruster_wifi_node" "recorder_node"; do
   pkill -9 -f "$node" 2>/dev/null || true
 done
 sleep 0.5
@@ -181,6 +186,7 @@ start_ros2_healthcheck "all" \
   "navi_lidar_driver" \
   "galaxy_camera" \
   "sbg_device" \
+  "battery_monitor" \
   "thruster_wifi_node" \
   "recorder_node" \
   "sensor_downsample_node"
@@ -201,6 +207,10 @@ EXTRACTOR_PIDS+=($!)
 
 # IMU (sbg_device)
 start_node_log_extractor "sbg_device"
+EXTRACTOR_PIDS+=($!)
+
+# Battery monitor
+start_node_log_extractor "battery_monitor"
 EXTRACTOR_PIDS+=($!)
 
 # Thruster
@@ -235,6 +245,7 @@ LAUNCH_ARGS=(
   "imu_config:=${IMU_CONFIG}"
   "thruster_config:=${THRUSTER_CONFIG}"
   "bag_config:=${BAG_CONFIG}"
+  "battery_config:=${BATTERY_CONFIG}"
   "zda_config:=${ZDA_CONFIG}"
   "recorder_config:=${RECORDER_CONFIG}"
   "compressor_config:=${COMPRESSOR_CONFIG}"
