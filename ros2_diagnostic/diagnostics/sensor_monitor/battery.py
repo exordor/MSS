@@ -275,68 +275,64 @@ class BatteryDiagnostic(BaseDiagnostic):
     def _read_battery_data(self) -> Dict[str, float]:
         """Read latest battery voltage data from ROS2 topic
 
+        Uses shell command to avoid importing custom message types.
+        Returns cached data if topic data unavailable.
+
         Returns:
-            Dict with channel voltages or empty dict if unavailable
+            Dict with channel voltages or cached data
         """
-        if not RCLPY_AVAILABLE:
-            return {}
-
         try:
-            import rclpy
-            from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+            import subprocess
+            import json
+            import re
 
-            # Import the BatteryVoltage message
-            try:
-                from battery_monitor.msg import BatteryVoltage
-            except ImportError:
-                # Message not available, return cached data
-                logger.warning("BatteryVoltage message type not available")
-                return self._latest_voltages
+            # Use ros2 topic echo with once flag to get latest message
+            # This avoids needing to import custom message types
+            env = {
+                'ROS_DOMAIN_ID': '42',
+                'AMENT_PREFIX_PATH': '/opt/ros/humble',
+                'PATH': '/opt/ros/humble/bin:/usr/bin:/bin'
+            }
 
-            helper = get_ros2_helper(42)
-
-            # Create temporary subscriber to receive latest message
-            received = {'msg': None, 'count': 0}
-
-            def msg_callback(msg):
-                received['msg'] = msg
-                received['count'] += 1
-
-            qos = QoSProfile(
-                reliability=ReliabilityPolicy.BEST_EFFORT,
-                durability=DurabilityPolicy.VOLATILE,
-                depth=1
-            )
-            sub = helper._node.create_subscription(
-                BatteryVoltage, self.voltage_topic, msg_callback, qos
+            result = subprocess.run(
+                ['ros2', 'topic', 'echo', '--once', self.voltage_topic],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                env=env
             )
 
-            # Wait for message (up to 2 seconds)
-            deadline = time.time() + 2.0
-            while time.time() < deadline and received['msg'] is None:
-                try:
-                    rclpy.spin_once(helper._node, timeout_sec=0.1)
-                except Exception:
-                    break
+            if result.returncode == 0 and result.stdout:
+                # Parse the output to extract voltage values
+                # Format: "channel_a0: 12.34" or similar
+                voltages = {}
+                for line in result.stdout.split('\n'):
+                    line = line.strip()
+                    # Match pattern like "channel_a0: 12.34" or "channel_a0: 12.345"
+                    match = re.match(r'(channel_a[0-3]):\s*([\d.]+)', line)
+                    if match:
+                        channel = match.group(1)
+                        try:
+                            voltage = float(match.group(2))
+                            voltages[channel] = round(voltage, 3)
+                        except ValueError:
+                            pass
 
-            # Clean up subscriber
-            sub.destroy()
+                if voltages:
+                    self._latest_voltages = voltages
+                    self._last_data_time = time.time()
+                    logger.debug(f"Battery voltages read via shell: {voltages}")
+                    return voltages
 
-            if received['msg'] is not None:
-                msg = received['msg']
-                self._latest_voltages = {
-                    'channel_a0': round(msg.channel_a0, 3) if hasattr(msg, 'channel_a0') else None,
-                    'channel_a1': round(msg.channel_a1, 3) if hasattr(msg, 'channel_a1') else None,
-                    'channel_a2': round(msg.channel_a2, 3) if hasattr(msg, 'channel_a2') else None,
-                    'channel_a3': round(msg.channel_a3, 3) if hasattr(msg, 'channel_a3') else None,
-                }
-                self._last_data_time = time.time()
-                logger.debug(f"Battery voltages read: {self._latest_voltages}")
-
+            # Topic echo failed, return cached data
+            logger.debug(f"Battery topic echo returned no data, using cache")
             return self._latest_voltages
 
+        except subprocess.TimeoutExpired:
+            logger.debug("Battery topic read timeout")
+            return self._latest_voltages
         except Exception as e:
-            logger.error(f"Battery data read error: {e}")
+            logger.debug(f"Battery data read error: {e}")
             return self._latest_voltages
 
     def _check_and_alert_voltage(self, channel: str, voltage: float, level: str):
