@@ -66,6 +66,16 @@ def generate_launch_description():
         description='YAML file that defines rosbag topics/output for the combined bringup.',
     )
 
+    battery_config = DeclareLaunchArgument(
+        'battery_config',
+        default_value=PathJoinSubstitution([
+            FindPackageShare('ros2_bringup'),
+            'config',
+            'battery.yaml',
+        ]),
+        description='Absolute path to the battery_monitor YAML configuration file.',
+    )
+
     record_bag = DeclareLaunchArgument(
         'record_bag',
         default_value='false',
@@ -130,14 +140,16 @@ def generate_launch_description():
     log_level = LaunchConfiguration('log_level')
     ros_args = ['--log-level', log_level]
 
+    # Get ROS_LOG_DIR from environment (set by run_ros2_all.sh)
+    # This ensures ROS2 logs go to the custom log directory structure:
+    # logs/{RUN_ID}/ros/ for ROS2 native logs
+    # logs/{RUN_ID}/app/00_master.log for captured stdout/stderr
+    ros_log_dir = _env_or_default('ROS_LOG_DIR', '')
+
     env_actions = [
         SetEnvironmentVariable('PYTHONUNBUFFERED', _env_or_default('PYTHONUNBUFFERED', '1')),
-        SetEnvironmentVariable('RCUTILS_CONSOLE_OUTPUT_FORMAT', _env_or_default(
-            'RCUTILS_CONSOLE_OUTPUT_FORMAT',
-            '[{time}] [{severity}] [{name}] {message}',
-        )),
-        SetEnvironmentVariable('RCUTILS_LOGGING_USE_STDOUT', _env_or_default('RCUTILS_LOGGING_USE_STDOUT', '1')),
-        SetEnvironmentVariable('RCUTILS_COLORIZED_OUTPUT', _env_or_default('RCUTILS_COLORIZED_OUTPUT', '0')),
+        # Ensure RCUTILS_LOGGING_USE_STDOUT is set (for file-only logging via run_ros2_all.sh)
+        # This allows RCLCPP logs to be captured by tee into 00_master.log
     ]
 
     lidar_node = Node(
@@ -179,7 +191,7 @@ def generate_launch_description():
         name='thruster_wifi_node',
         output='screen',
         parameters=[LaunchConfiguration('thruster_config')],
-        ros_arguments=ros_args,
+        ros_arguments=['--log-level', LaunchConfiguration('log_level')],
     )
 
     recorder_node = Node(
@@ -201,6 +213,15 @@ def generate_launch_description():
             ('/navi_lidar/points', LaunchConfiguration('compressor_input')),
             ('/points_downsampled', LaunchConfiguration('compressor_output')),
         ],
+        ros_arguments=ros_args,
+    )
+
+    battery_monitor_node = Node(
+        package='battery_monitor',
+        executable='battery_monitor_node',
+        name='battery_monitor',
+        output='screen',
+        parameters=[LaunchConfiguration('battery_config')],
         ros_arguments=ros_args,
     )
 
@@ -256,6 +277,7 @@ def generate_launch_description():
         imu_config,
         thruster_config,
         bag_config,
+        battery_config,
         record_bag,
         record_topics,
         bag_output,
@@ -271,5 +293,6 @@ def generate_launch_description():
         thruster_node,
         recorder_node,
         compressor_node,
+        battery_monitor_node,
         OpaqueFunction(function=launch_bag_record),
     ])
