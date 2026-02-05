@@ -1,0 +1,101 @@
+# Sensor Reverse Proxy Configuration - Direct Port Mapping
+upstream uli_lidar {
+    server 192.168.0.10:5000;
+    keepalive 32;
+}
+
+upstream navi_lidar {
+    server 192.168.0.201:80;
+    keepalive 32;
+}
+
+upstream time_machine_proxy {
+    server 127.0.0.1:8888;  # Python proxy handles Digest auth
+    keepalive 32;
+}
+
+# Uli LiDAR - Port 8081 - Direct mapping
+server {
+    listen 8081;
+    server_name _;
+
+    access_log /var/log/nginx/uli_lidar_access.log;
+    error_log /var/log/nginx/uli_lidar_error.log;
+
+    client_max_body_size 10m;
+    proxy_buffer_size 128k;
+    proxy_buffers 4 256k;
+
+    location / {
+        proxy_pass http://uli_lidar;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_connect_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_read_timeout 3600s;
+    }
+}
+
+# Navi LiDAR - Port 8082 - Direct mapping
+server {
+    listen 8082;
+    server_name _;
+
+    access_log /var/log/nginx/navi_lidar_access.log;
+    error_log /var/log/nginx/navi_lidar_error.log;
+
+    client_max_body_size 10m;
+
+    location / {
+        proxy_pass http://navi_lidar;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
+
+# Time Machine - Port 8083 - Uses Python proxy for Digest auth
+server {
+    listen 8083;
+    server_name _;
+
+    access_log /var/log/nginx/time_machine_access.log;
+    error_log /var/log/nginx/time_machine_error.log;
+
+    client_max_body_size 10m;
+
+    location / {
+        proxy_pass http://time_machine_proxy;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
+
+# Health check on port 8080
+server {
+    listen 8080;
+    server_name _;
+
+    location /health {
+        return 200 "Sensor Proxy OK\n";
+        add_header Content-Type text/plain;
+    }
+
+    location / {
+        return 200 "Sensor Proxy Running\n\nAvailable endpoints:\n  Port 8081: Uli LiDAR (192.168.0.10:5000)\n  Port 8082: Navi LiDAR (192.168.0.201:80)\n  Port 8083: Time Machine (192.168.0.20:80)\n";
+        add_header Content-Type text/plain;
+    }
+}
