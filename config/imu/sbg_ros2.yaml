@@ -31,7 +31,7 @@
       portName: "/dev/serial/by-id/usb-FTDI_USB-RS232-WE_AV0LWWD1-if00-port0"
     
       # Baud rate (4800 ,9600 ,19200 ,38400 ,115200 [default],230400 ,460800 ,921600)
-      baudRate: 115200
+      baudRate: 460800
 
       # List of fallback baud rates to test if configured baud rate doesn't work.
       # fallbackBaudRates:
@@ -275,13 +275,13 @@
       # Status general, clock, com aiding, solution, heave
       log_status: 200
       # Includes IMU status, acc., gyro, temp delta speeds and delta angles values
-      log_imu_data: 8
+      log_imu_data: 1
       # Includes roll, pitch, yaw and their accuracies on each axis
-      log_ekf_euler: 8
+      log_ekf_euler: 1
       # Includes the 4 quaternions values
-      log_ekf_quat: 8
+      log_ekf_quat: 1
       # Position and velocities in NED coordinates with the accuracies on each axis
-      log_ekf_nav: 8
+      log_ekf_nav: 1
       # Velocity expressed in the INS body/vehicle frame
       log_ekf_vel_body: 0
       # Rotations rate and accelerations in the INS body/vehicle frame
@@ -293,7 +293,7 @@
       # Provides UTC time reference
       log_utc_time: 200
       # Magnetic data with associated accelerometer on each axis
-      log_mag: 8
+      log_mag: 0
       # Magnetometer calibration data (raw buffer)
       log_mag_calib: 0
       # GPS velocities from primary or secondary GPS receiver
@@ -312,7 +312,7 @@
       log_event_c: 0
       log_event_d: 0
       # Air data
-      log_air_data: 8
+      log_air_data: 0
       # Short IMU data
       log_imu_short: 0
 
