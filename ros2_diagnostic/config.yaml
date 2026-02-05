@@ -66,6 +66,7 @@ sensors:
     camera: "192.168.0.11"         # GigE camera for visual sensing
     thruster: "192.168.50.100"     # Thruster controller WiFi module
     time_machine: "192.168.0.20"   # Time synchronization server (PTP grandmaster)
+    battery: "192.168.0.50"        # Battery monitor (I2C on local host, IP placeholder)
 
   # Diagnostic thresholds for each sensor (determine OK/WARNING/CRITICAL status)
   thresholds:
@@ -95,6 +96,12 @@ sensors:
       heartbeat_timeout: 3.0       # Maximum time between heartbeat messages (seconds)
       tcp_timeout: 5.0             # TCP connection timeout (seconds)
       max_response_time: 500       # Maximum command response time (milliseconds)
+
+    # Battery thresholds (ADS1115 ADC voltage monitoring)
+    battery:
+      min_voltage: 11.0            # Minimum safe voltage (V)
+      max_voltage: 14.4            # Maximum safe voltage (V) - 4S LiPo fully charged
+      critical_voltage: 10.5       # Critical low voltage (V) - immediate action needed
 
     # PTP (Precision Time Protocol) thresholds
     ptp:
@@ -135,6 +142,9 @@ sensors:
     thruster:
       status: "/thruster_status_pwm"   # Thruster status and PWM values
 
+    battery:
+      voltage: "/battery_voltage"      # Battery voltage data from ADS1115
+
     ptp:
       zda: "/ptp/zda"                  # ZDA time message (UTC time)
 
@@ -148,6 +158,7 @@ ros2_nodes:
     - "galaxy_camera"        # GigE camera driver
     - "sbg_device"           # IMU/GPS driver
     - "thruster_wifi_node"   # Thruster communication node
+    - "battery_monitor"      # Battery voltage monitor (ADS1115)
     - "sensor_compressor"    # Data compression node
     - "recorder_node"        # Rosbag recording node
 
@@ -164,6 +175,7 @@ ros2_nodes:
     camera: ["galaxy_camera"]
     imu: ["sbg_device"]
     thruster: ["thruster_wifi_node"]
+    battery: ["battery_monitor"]
 
 # ------------------------------------------------------------------------------
 # Sensor Connection Types
@@ -174,6 +186,7 @@ sensor_connections:
   camera: "network"        # GigE Vision protocol
   imu: "usb"               # Serial-over-USB connection
   thruster: "network"      # WiFi (TCP)
+  battery: "i2c"           # I2C (local ADS1115)
 
 # ------------------------------------------------------------------------------
 # Monitoring Behavior

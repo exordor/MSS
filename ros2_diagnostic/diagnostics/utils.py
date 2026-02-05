@@ -154,14 +154,22 @@ def check_gige_camera_arp(camera_ip: str) -> Dict[str, Any]:
             lines = result.stdout.strip().split('\n')
             for line in lines:
                 if camera_ip in line:
+                    # Check for FAILED state first (camera unreachable)
+                    if 'FAILED' in line:
+                        return {
+                            'host': camera_ip,
+                            'reachable': False,
+                            'method': 'arp',
+                            'state': 'FAILED'
+                        }
+                    # Check for valid states with MAC address
                     has_mac = 'lladdr' in line
-                    state = 'REACHABLE' if 'REACHABLE' in line or 'STALE' in line or 'DELAY' in line else 'UNKNOWN'
-                    if has_mac or state != 'FAILED':
+                    if 'REACHABLE' in line or 'STALE' in line or 'DELAY' in line:
                         return {
                             'host': camera_ip,
                             'reachable': True,
                             'method': 'arp',
-                            'state': state
+                            'state': 'REACHABLE'
                         }
         return {
             'host': camera_ip,

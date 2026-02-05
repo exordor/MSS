@@ -406,7 +406,7 @@ class IMUDiagnostic(BaseDiagnostic):
         """
         try:
             import json
-            from ...alerts import get_alert_store, Alert
+            from alerts import get_alert_store, Alert
 
             alert = Alert(
                 sensor='imu',

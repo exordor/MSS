@@ -8,6 +8,7 @@ from .uli_lidar import UliLidarDiagnostic
 from .camera import CameraDiagnostic
 from .imu import IMUDiagnostic
 from .thruster import ThrusterDiagnostic
+from .battery import BatteryDiagnostic
 
 __all__ = [
     'NaviLidarDiagnostic',
@@ -15,4 +16,5 @@ __all__ = [
     'CameraDiagnostic',
     'IMUDiagnostic',
     'ThrusterDiagnostic',
+    'BatteryDiagnostic',
 ]

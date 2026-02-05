@@ -27,6 +27,9 @@
         <button class="sensor-tab" data-sensor="thruster">
             <i class="fa-solid fa-anchor"></i> Thruster
         </button>
+        <button class="sensor-tab" data-sensor="battery">
+            <i class="fa-solid fa-battery-half"></i> Battery
+        </button>
     </div>
 
     <!-- Navi LiDAR Panel -->
@@ -203,6 +206,68 @@
                     <div class="info-row">
                         <span class="info-label">Latency</span>
                         <span class="info-value" id="thrusterLatencyValue">-- ms</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Battery Panel -->
+    <div class="sensor-panel" id="batteryPanel">
+        <div class="panel-header">
+            <div class="panel-title">
+                <i class="fa-solid fa-battery-half"></i>
+                <h2>Battery Monitor (ADS1115)</h2>
+            </div>
+            <span class="status-badge large" id="batteryStatusBadge">Checking...</span>
+        </div>
+
+        <div class="panel-sections">
+            <!-- Connection Status -->
+            <div class="panel-section">
+                <h3><i class="fa-solid fa-bolt"></i> Voltage Levels</h3>
+                <div class="connection-info">
+                    <div class="info-row">
+                        <span class="info-label">Main Battery (A0)</span>
+                        <span class="info-value" id="batteryMainVoltage">--</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Channel A0 (Messtechnik +)</span>
+                        <span class="info-value" id="batteryA0">-- V</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Channel A1 (Messtechnik -)</span>
+                        <span class="info-value" id="batteryA1">-- V</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Channel A2 (Antrieb +)</span>
+                        <span class="info-value" id="batteryA2">-- V</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Channel A3 (Antrieb -)</span>
+                        <span class="info-value" id="batteryA3">-- V</span>
+                    </div>
+                </div>
+            </div>
+            <!-- Threshold Info -->
+            <div class="panel-section">
+                <h3><i class="fa-solid fa-circle-info"></i> Thresholds (4S LiPo)</h3>
+                <div class="connection-info">
+                    <div class="info-row">
+                        <span class="info-label">Critical</span>
+                        <span class="info-value text-danger">&le; 10.5V</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Low</span>
+                        <span class="info-value text-warning">&le; 11.0V</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Normal</span>
+                        <span class="info-value text-success">11.0V - 14.4V</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Overvoltage</span>
+                        <span class="info-value text-warning">&ge; 14.4V</span>
                     </div>
                 </div>
             </div>

@@ -10,6 +10,7 @@ const SENSOR_INFO = {
     camera: { name: 'Camera', icon: 'fa-camera', nodePatterns: ['camera', 'galaxy', 'gmsl'] },
     imu: { name: 'IMU', icon: 'fa-compass', nodePatterns: ['sbg', 'imu', 'ekf'] },
     thruster: { name: 'Arduino (Thruster)', icon: 'fa-microchip', nodePatterns: ['thruster', 'pwm', 'motor'] },
+    battery: { name: 'Battery', icon: 'fa-battery-half', nodePatterns: ['battery', 'ads1115'] },
 };
 
 // Sensor update tracking
@@ -36,7 +37,7 @@ function initSensorsTable() {
     const tableBody = document.getElementById('sensorsTableBody');
     if (!tableBody) return;
 
-    const sensors = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster'];
+    const sensors = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery'];
     let html = '';
     for (const sensor of sensors) {
         const info = SENSOR_INFO[sensor];
@@ -151,6 +152,7 @@ function updateSensorsDisplay(sensorsData) {
             camera: ['galaxy_camera', 'camera'],
             imu: ['sbg_device', 'imu', 'ekf'],
             thruster: ['thruster_wifi_node', 'thruster'],
+            battery: ['battery_monitor', 'battery'],
         };
 
         // Topic patterns for each sensor
@@ -160,6 +162,7 @@ function updateSensorsDisplay(sensorsData) {
             camera: ['image_raw', 'camera'],
             imu: ['imu/data', 'sbg'],
             thruster: ['thruster_status', 'thruster'],
+            battery: ['battery_voltage', 'battery'],
         };
 
         // Use cached ROS2 data for node/topic detection
@@ -368,6 +371,7 @@ function updateTopicsList(ros2Data) {
             '/image_raw',
             '/imu/data',
             '/thruster_status_pwm',
+            '/battery_voltage',
         ];
 
         const sortedTopics = topics.sort((a, b) => {

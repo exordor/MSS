@@ -38,7 +38,7 @@ from diagnostics import ROS2Monitor, ROS2Controller
 from diagnostics.rosbag_controller import get_rosbag_controller
 from diagnostics.sensor_monitor import (
     NaviLidarDiagnostic, UliLidarDiagnostic,
-    CameraDiagnostic, IMUDiagnostic, ThrusterDiagnostic
+    CameraDiagnostic, IMUDiagnostic, ThrusterDiagnostic, BatteryDiagnostic
 )
 from alerts import get_alert_store, Alert
 from event_log import get_event_store, EventLog
@@ -297,6 +297,7 @@ class MessageCompressor:
         'camera': 'cam',
         'imu': 'imu',
         'thruster': 'th',
+        'battery': 'bat',
         'alert_type': 'at',
         'metric_value': 'mv',
         'created_at': 'ca',
@@ -530,6 +531,13 @@ def get_monitor(name: str):
                 })
             elif name == 'thruster':
                 _monitors[name] = ThrusterDiagnostic({
+                    'SENSOR_THRESHOLDS': SENSOR_THRESHOLDS,
+                    'SENSOR_IPS': SENSOR_IPS,
+                    'ROS2_TOPICS': ROS2_TOPICS,
+                    'ENABLE_TOPIC_DETAILS': ENABLE_TOPIC_DETAILS,
+                })
+            elif name == 'battery':
+                _monitors[name] = BatteryDiagnostic({
                     'SENSOR_THRESHOLDS': SENSOR_THRESHOLDS,
                     'SENSOR_IPS': SENSOR_IPS,
                     'ROS2_TOPICS': ROS2_TOPICS,
@@ -1042,7 +1050,7 @@ def _get_domain_id() -> int:
 
 def collect_sensor_status() -> Dict[str, Any]:
     """Collect status of all sensors (internal, non-cached)"""
-    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster']
+    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery']
     sensors = {}
 
     for name in sensor_names:
@@ -1093,6 +1101,11 @@ def collect_sensor_status() -> Dict[str, Any]:
                 connected = 'Connected' if network.get('reachable', False) else 'Disconnected'
                 latency = network.get('latency_ms', 0)
                 packet_loss = network.get('packet_loss', 0)
+            elif name == 'battery':
+                # Battery uses ROS2 topic data
+                topics = metrics.get('topics', {})
+                voltages = topics.get('voltages', {})
+                connected = 'Connected' if topics.get('data_available') else 'Disconnected'
 
             # Extract topic and node availability for frontend display
             topic_available = _get_topic_available(metrics, name)
@@ -1116,6 +1129,7 @@ def collect_sensor_status() -> Dict[str, Any]:
                         'camera': 'Camera',
                         'imu': 'IMU',
                         'thruster': 'Arduino (Thruster)',
+                        'battery': 'Battery',
                     }
                     display_name = sensor_display_names.get(name, name)
                     if 'connected' in summary['status']:
@@ -1141,6 +1155,7 @@ def collect_sensor_status() -> Dict[str, Any]:
                 'satellites': satellites,
                 'topic_available': topic_available,
                 'node_available': node_available,
+                'voltages': summary.get('voltages', {}),
             }
         except Exception as e:
             logger.debug(f"Error collecting {name}: {e}")
