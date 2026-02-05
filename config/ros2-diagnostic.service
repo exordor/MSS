@@ -1,0 +1,24 @@
+[Unit]
+Description=ROS2 System Diagnostic Web Application
+After=network.target
+
+[Service]
+Type=simple
+User=eagrumo
+Group=eagrumo
+WorkingDirectory=/home/eagrumo/mss_lecture/ros2_diagnostic
+Environment="PATH=/usr/bin:/usr/local/bin:/opt/ros/humble/bin"
+Environment="ROS_DOMAIN_ID=42"
+Environment="AMENT_PREFIX_PATH=/opt/ros/humble"
+Environment="PYTHONPATH=/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages"
+Environment="LD_LIBRARY_PATH=/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/aarch64-linux-gnu:/opt/ros/humble/lib"
+Environment="ROS_DISTRO=humble"
+Environment="ROS_PYTHON_VERSION=3"
+ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 5000 --log-level info
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
