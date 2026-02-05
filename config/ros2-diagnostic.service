@@ -4,6 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
+TimeoutStopSec=5
 User=eagrumo
 Group=eagrumo
 WorkingDirectory=/home/eagrumo/mss_lecture/ros2_diagnostic
