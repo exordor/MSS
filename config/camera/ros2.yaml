@@ -23,7 +23,7 @@ galaxy_camera:
     gain_auto: false
     gain_min: 5.0
     gain_max: 24.0
-    gain_value: 15.0
+    gain_value: 24.0
     white_auto: true
     white_selector: 0
     white_value: 1.0

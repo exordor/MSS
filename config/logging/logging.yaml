@@ -1,0 +1,58 @@
+# ROS2 日志配置文件
+# 使用方法：
+#   1. 通过 --log-profile 参数指定 profile: ./run_ros2_camera.sh --log-profile prod
+#   2. 通过环境变量: export LOG_PROFILE=prod
+#   3. 通过自定义配置: ./run_ros2_camera.sh --log-config /path/to/config.yaml
+
+# 默认使用的 profile（当未指定时）
+default_profile: dev
+
+# Profile 定义
+profiles:
+  # 开发环境 - 详细输出，彩色，便于调试
+  dev:
+    rcutils:
+      use_stdout: 1
+      colorized_output: 1
+      console_output_format: '[{time}] [{severity}] [{name}] {message}'
+      buffered_stream: 0
+      log_level: info
+    python:
+      unbuffered: 1
+      verbose: 0
+
+  # 生产环境 - 最小输出，结构化日志
+  prod:
+    rcutils:
+      use_stdout: 1
+      colorized_output: 0
+      console_output_format: '[{time}] [{severity}] [{name}] {message}'
+      buffered_stream: 1
+      log_level: warn
+    python:
+      unbuffered: 1
+      verbose: 0
+
+  # 调试环境 - 最大详细程度，包含文件和行号
+  debug:
+    rcutils:
+      use_stdout: 1
+      colorized_output: 1
+      console_output_format: '[{time}] [{severity}] [{name}] [{file}:{line}] {message}'
+      buffered_stream: 0
+      log_level: debug
+    python:
+      unbuffered: 1
+      verbose: 1
+
+  # 最小配置 - 仅输出错误
+  minimal:
+    rcutils:
+      use_stdout: 1
+      colorized_output: 0
+      console_output_format: '{severity}: {message}'
+      buffered_stream: 1
+      log_level: error
+    python:
+      unbuffered: 0
+      verbose: 0
