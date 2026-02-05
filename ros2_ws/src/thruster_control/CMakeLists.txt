@@ -13,6 +13,9 @@ find_package(rosidl_default_generators REQUIRED)
 set(msg_files
 	"msg/ThrusterStatusPWM.msg"
 	"msg/ThrusterCmdPWM.msg"
+	"msg/SpeedData.msg"
+	"msg/ConnectionStatus.msg"
+	"msg/ThrusterMetrics.msg"
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}
