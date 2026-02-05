@@ -269,15 +269,28 @@ start_node_log_extractor() {
 
   # Start background process to monitor and extract
   (
+    # Wait for master log to exist and have content
     while [[ ! -f "${master_log}" ]] || [[ ! -s "${master_log}" ]]; do
       sleep 0.5
     done
 
-    # Initial extraction
-    grep -E "\[(${log_pattern}[-_][0-9]+|${log_pattern})\]" "${master_log}" > "${extracted_log}" 2>/dev/null || true
+    # Extract matching lines using bash regex (more reliable than grep -E for this case)
+    # Pattern matches lines starting with [log_pattern] or [log_pattern-N]
+    local regex="^\\[${log_pattern}(-[0-9]+)?\\]"
+
+    # Initial extraction with ANSI code stripping
+    while IFS= read -r line; do
+      if [[ "$line" =~ $regex ]]; then
+        echo "$line" | sed 's/\x1b\[[0-9;]*m//g'
+      fi
+    done < "${master_log}" > "${extracted_log}" 2>/dev/null
 
     # Follow the master log and append new lines
-    tail -f "${master_log}" 2>/dev/null | grep -E "\[(${log_pattern}[-_][0-9]+|${log_pattern})\]" >> "${extracted_log}" 2>/dev/null
+    tail -f "${master_log}" 2>/dev/null | while IFS= read -r line; do
+      if [[ "$line" =~ $regex ]]; then
+        echo "$line" | sed 's/\x1b\[[0-9;]*m//g'
+      fi
+    done >> "${extracted_log}" 2>/dev/null
   ) &
 
   echo "$!"  # Return the background process PID
