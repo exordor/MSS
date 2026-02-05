@@ -1,0 +1,14 @@
+# Battery Monitor Node Configuration
+
+battery_monitor:
+  ros__parameters:
+    # I2C Configuration
+    i2c_bus: 1              # I2C bus number
+    i2c_addr: 0x48          # ADS1115 I2C address
+
+    # ADC Configuration
+    gain: 1                 # PGA gain: 1 = +/-4.096V
+
+    # Publishing
+    publish_rate: 5.0       # Publishing rate in Hz
+    frame_id: "battery_sensor"  # Frame ID for message header
