@@ -23,6 +23,7 @@ class UliLidarDiagnostic(BaseDiagnostic):
     def __init__(self, config: dict):
         super().__init__("uli_lidar", config)
         self.ips = config.get('SENSOR_IPS', {})
+        self.thresholds = config.get('SENSOR_THRESHOLDS', {}).get('uli_lidar', {})
 
         self.lidar_ip = self.ips.get('uli_lidar', '192.168.0.10')
 
@@ -33,8 +34,10 @@ class UliLidarDiagnostic(BaseDiagnostic):
         # Connection state caching for resilience against transient failures
         self._last_successful_connection = 0  # timestamp of last successful connection
         self._consecutive_failures = 0
-        self._connection_grace_period = 30  # seconds to keep "connected" after last success
-        self._max_consecutive_failures = 3
+        self._connection_grace_period = float(self.thresholds.get('connection_grace_period', 30))
+        self._max_consecutive_failures = int(self.thresholds.get('max_consecutive_failures', 3))
+        self._ping_timeout = float(self.thresholds.get('ping_timeout', 2.0))
+        self._ping_count = int(self.thresholds.get('ping_count', 2))
 
         # Alert tracking to avoid duplicate alerts
         self._last_alert_time = {}  # alert_type -> last_timestamp
@@ -119,7 +122,7 @@ class UliLidarDiagnostic(BaseDiagnostic):
         from transient network issues.
         """
         current_time = time.time()
-        result = ping_host(self.lidar_ip, timeout=2, count=2)
+        result = ping_host(self.lidar_ip, timeout=self._ping_timeout, count=self._ping_count)
 
         if result.get('reachable'):
             # Connection successful - update state

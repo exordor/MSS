@@ -83,9 +83,15 @@ sensors:
       max_packet_loss: 1.0         # Maximum acceptable packet loss (%)
       udp_timeout: 2.0             # UDP connection timeout (seconds)
       min_points_per_frame: 50000  # Minimum expected points per scan
+      connection_grace_period: 2.0 # Seconds to keep cached connectivity after last success
+      max_consecutive_failures: 1  # Failures before declaring disconnected
 
     # U-LiDAR thresholds (network connectivity test only, no ROS driver)
-    uli_lidar: {}                  # Empty: only ping/connectivity tests performed
+    uli_lidar:
+      ping_timeout: 1.0            # Ping timeout (seconds)
+      ping_count: 1                # Ping count
+      connection_grace_period: 2.0 # Seconds to keep cached connectivity after last success
+      max_consecutive_failures: 1  # Failures before declaring disconnected
 
     # Camera thresholds (GigE machine vision camera)
     camera:
@@ -94,7 +100,7 @@ sensors:
       max_latency: 500             # Maximum image latency (milliseconds)
       gige_timeout: 2.0            # GigE connection timeout (seconds)
       expected_resolution: [4096, 3000]  # [width, height] in pixels
-      connection_grace_period: 3.0 # Seconds to keep cached connectivity after last success
+      connection_grace_period: 2.0 # Seconds to keep cached connectivity after last success
       max_consecutive_failures: 1  # Failures before declaring disconnected
 
     # IMU thresholds (only topic existence and one-time data check)
@@ -102,9 +108,13 @@ sensors:
 
     # Thruster thresholds (propulsion control system)
     thruster:
-      heartbeat_timeout: 3.0       # Maximum time between heartbeat messages (seconds)
-      tcp_timeout: 5.0             # TCP connection timeout (seconds)
+      heartbeat_timeout: 1.5       # Maximum time between heartbeat messages (seconds)
+      tcp_timeout: 2.0             # TCP connection timeout (seconds)
       max_response_time: 500       # Maximum command response time (milliseconds)
+      ping_timeout: 1.0            # Ping timeout (seconds)
+      ping_count: 1                # Ping count
+      connection_grace_period: 2.0 # Seconds to keep cached connectivity after last success
+      max_consecutive_failures: 1  # Failures before declaring disconnected
 
     # Battery thresholds (ADS1115 ADC voltage monitoring)
     battery:

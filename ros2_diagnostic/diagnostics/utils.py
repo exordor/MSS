@@ -141,6 +141,33 @@ def check_gige_camera_arp(camera_ip: str) -> Dict[str, Any]:
         Dict with 'reachable' status and ARP entry info
     """
     try:
+        # Prefer active ARP probe if available (faster disconnect detection)
+        try:
+            import shutil
+            if shutil.which('arping'):
+                proc = subprocess.run(
+                    ['arping', '-c', '1', '-w', '1', camera_ip],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+                if proc.returncode == 0:
+                    return {
+                        'host': camera_ip,
+                        'reachable': True,
+                        'method': 'arping',
+                        'state': 'REACHABLE'
+                    }
+                return {
+                    'host': camera_ip,
+                    'reachable': False,
+                    'method': 'arping',
+                    'state': 'FAILED',
+                    'error': (proc.stderr or proc.stdout).strip()
+                }
+        except Exception:
+            pass
+
         result = subprocess.run(
             ['ip', 'neigh', 'show', camera_ip],
             capture_output=True,

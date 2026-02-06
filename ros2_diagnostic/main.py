@@ -1466,7 +1466,7 @@ def collect_active_alerts() -> List[Dict]:
 # 频道配置（按更新频率分离）
 CHANNEL_CONFIG = {
     Channel.SENSORS: {
-        "interval": 1,        # 1 秒更新 (实时响应)
+        "interval": 0.5,      # 0.5 秒更新 (实时响应)
         "priority": "high",   # 高优先级
         "cache_ttl": 0.5,     # 使用 0.5 秒缓存 (最小化延迟)
     },

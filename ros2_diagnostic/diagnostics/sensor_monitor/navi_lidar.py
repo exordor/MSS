@@ -25,6 +25,7 @@ class NaviLidarDiagnostic(BaseDiagnostic):
         super().__init__("navi_lidar", config)
         self.ips = config.get('SENSOR_IPS', {})
         self.topics = config.get('ROS2_TOPICS', {}).get('navi_lidar', {})
+        self.thresholds = config.get('SENSOR_THRESHOLDS', {}).get('navi_lidar', {})
 
         self.lidar_ip = self.ips.get('navi_lidar', '192.168.0.201')
         self.points_topic = self.topics.get('points', '/navi_lidar/points')
@@ -44,8 +45,8 @@ class NaviLidarDiagnostic(BaseDiagnostic):
         # Connection state caching for resilience against transient failures
         self._last_successful_connection = 0  # timestamp of last successful connection
         self._consecutive_failures = 0  # count of consecutive failures
-        self._connection_grace_period = 30  # seconds to keep "connected" after last success
-        self._max_consecutive_failures = 3  # failures before showing disconnected during grace period
+        self._connection_grace_period = float(self.thresholds.get('connection_grace_period', 30))
+        self._max_consecutive_failures = int(self.thresholds.get('max_consecutive_failures', 3))
 
         # Track previous connection state for disconnection alerts
         self._was_connected = True  # Assume connected on startup

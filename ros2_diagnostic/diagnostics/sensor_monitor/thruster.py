@@ -41,6 +41,8 @@ class ThrusterDiagnostic(BaseDiagnostic):
 
         # UDP timeout (matching driver's udp_timeout parameter)
         self.udp_timeout = thresholds.get('heartbeat_timeout', 5.0)
+        self._ping_timeout = float(thresholds.get('ping_timeout', 2.0))
+        self._ping_count = int(thresholds.get('ping_count', 2))
 
         # UDP socket for heartbeat detection
         self._udp_socket: Optional[socket.socket] = None
@@ -57,8 +59,8 @@ class ThrusterDiagnostic(BaseDiagnostic):
         # Connection state caching for resilience against transient failures
         self._last_successful_connection = 0
         self._consecutive_failures = 0
-        self._connection_grace_period = 30
-        self._max_consecutive_failures = 3
+        self._connection_grace_period = float(thresholds.get('connection_grace_period', 30))
+        self._max_consecutive_failures = int(thresholds.get('max_consecutive_failures', 3))
 
         # Alert tracking to avoid duplicate alerts
         self._last_alert_time = {}  # alert_type -> last_timestamp
@@ -297,7 +299,7 @@ class ThrusterDiagnostic(BaseDiagnostic):
         Includes connection state caching to prevent false disconnections.
         """
         current_time = time.time()
-        result = ping_host(self.thruster_ip, timeout=2, count=2)
+        result = ping_host(self.thruster_ip, timeout=self._ping_timeout, count=self._ping_count)
 
         if result.get('reachable'):
             self._last_successful_connection = current_time
