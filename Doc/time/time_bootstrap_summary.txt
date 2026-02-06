@@ -1,0 +1,80 @@
+时间同步流程总结 (NTP 引导 -> PTP 精确同步)
+==================================================
+
+目标
+--------------------------------------------------
+- 开机后先用 NTP 将系统时间拉到正确范围
+- 等 PTP master 上线后，切换为 PTP 精确同步
+- 避免 NTP 与 phc2sys 争夺系统时钟
+
+关键组件
+--------------------------------------------------
+- NTP 客户端: chrony
+- NTP 服务器: TM2500C (192.168.0.20)
+- PTP 客户端: ptp4l-client.service
+- PHC->系统时钟: phc2sys-client.service
+- 引导脚本: /home/eagrumo/mss_lecture/scripts/time_bootstrap.sh
+- 监测脚本: /home/eagrumo/mss_lecture/scripts/ptp_wait_master_check.sh
+- systemd 服务: /etc/systemd/system/time-bootstrap.service
+- 日志文件: /home/eagrumo/mss_lecture/logs/time-bootstrap.log
+
+流程概述
+--------------------------------------------------
+1. 停止 ptp4l/phc2sys (避免与 NTP 冲突)
+2. 启动 chrony，同步系统时间到 TM2500C
+3. 同步成功后写入 PHC (phc_ctl /dev/ptp0 set)
+4. 停止 chrony
+5. 启动 ptp4l 和 phc2sys
+6. 等待 PTP master 并检查 PHC 是否已跳到当前时间
+
+chrony 同步判定 (脚本内严格条件)
+--------------------------------------------------
+同时满足以下三项才认为同步成功:
+- Leap status 为 Normal / Insert second / Delete second
+- Reference ID 不是 00000000
+- Stratum > 0
+
+配置与参数
+--------------------------------------------------
+chrony 配置:
+- /etc/chrony/chrony.conf
+- 关键条目: server 192.168.0.20 iburst prefer
+
+引导脚本参数 (可通过 /etc/default/time-bootstrap 覆盖):
+- TM_IP       (默认 192.168.0.20)
+- IFACE       (默认 eno1)
+- PTP_DEV     (默认 /dev/ptp0)
+- TIMEOUT     (默认 240 秒)
+- INTERVAL    (默认 2 秒)
+- LOG_FILE    (默认 /home/eagrumo/mss_lecture/logs/time-bootstrap.log)
+
+当前环境设置:
+- /etc/default/time-bootstrap: TIMEOUT=600, INTERVAL=2
+
+systemd 超时:
+- time-bootstrap.service 的 TimeoutStartSec 应 >= TIMEOUT
+
+安装与启用
+--------------------------------------------------
+安装脚本:
+sudo /home/eagrumo/mss_lecture/scripts/install_time_bootstrap_service.sh
+
+查看状态:
+systemctl status time-bootstrap.service --no-pager -l
+journalctl -u time-bootstrap.service -b
+
+常见现象
+--------------------------------------------------
+- PTP master 需等待 GPS 定位 (2-3 分钟) 后上线
+- 在 master 上线前，ptp4l 可能显示 selected local clock
+- 一旦 master 出现，允许 step 会使 PHC 从 1970 直接跳到当前时间
+
+故障排查
+--------------------------------------------------
+- NTP 不同步:
+  - chronyc tracking 显示 Reference ID=00000000 / Stratum=0 / Leap status=Not synchronised
+  - 需确认 TM2500C NTP 已开启且 UDP/123 可达
+
+- PTP 不锁定:
+  - 检查 ptp4l 日志是否有 foreign master
+  - 运行 /home/eagrumo/mss_lecture/scripts/ptp_wait_master_check.sh
