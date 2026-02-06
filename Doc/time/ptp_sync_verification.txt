@@ -1,0 +1,245 @@
+PTP 完全同步系统时钟 - 验证方法
+================================================================================
+
+本文档用于验证 phc2sys 是否正确将 PTP 时间同步到系统时钟。
+
+
+一、服务状态检查
+--------------------------------------------------------------------------------
+
+=== 1. 检查 phc2sys 服务状态 =========================================================
+
+sudo systemctl status phc2sys@eno1.service
+
+预期输出:
+  ● phc2sys@eno1.service - PTP Hardware Clock to System Clock Sync
+     Loaded: loaded (/lib/systemd/system/phc2sys@.service; enabled)
+     Active: active (running)
+
+=== 2. 确认 systemd-timesyncd 已停止 ===============================================
+
+sudo systemctl status systemd-timesyncd.service
+timedatectl status
+
+预期输出 (timedatectl):
+              NTP service: inactive
+
+=== 3. 一键检查所有服务 ===========================================================
+
+echo "=== phc2sys 状态 ===" && \
+sudo systemctl status phc2sys@eno1.service --no-pager | head -5 && \
+echo -e "\n=== systemd-timesyncd 状态 ===" && \
+sudo systemctl status systemd-timesyncd.service --no-pager | head -5 && \
+echo -e "\n=== timedatectl 状态 ===" && \
+timedatectl status
+
+
+二、日志分析
+--------------------------------------------------------------------------------
+
+=== 1. 查看 phc2sys 实时日志 =======================================================
+
+sudo journalctl -u phc2sys@eno1.service -f
+
+正常输出示例:
+  phc2sys[1234]: phc2sys[5678.123] offset: +456 ns  rms:234 ns
+  phc2sys[1234]: phc2sys[5678.234] offset: +123 ns  rms:189 ns
+
+关键指标:
+  offset  - PHC 与系统时钟的偏移量 (纳秒级为正常)
+  rms     - 均方根偏差，越小越稳定
+  freq    - 频率调整值 (ppm)
+
+=== 2. 查看最近的同步记录 =========================================================
+
+sudo journalctl -u phc2sys@eno1.service --no-pager -n 20
+
+
+三、时钟对比测试
+--------------------------------------------------------------------------------
+
+=== 1. 读取网卡 PHC 时间 ===========================================================
+
+sudo phc_ctl eno1 get
+
+输出示例:
+  clock time is 1698034567.123456789
+
+=== 2. 读取系统时间 (纳秒精度) ====================================================
+
+date +"%Y-%m-%d %H:%M:%S.%N"
+
+输出示例:
+  2026-02-06 11:51:52.123456789
+
+=== 3. 计算两者差异 ==============================================================
+
+# 同时读取两者进行对比
+echo "PHC: $(sudo phc_ctl eno1 get | grep 'clock time')" && \
+echo "SYS: $(date +"%Y-%m-%d %H:%M:%S.%N")"
+
+正常情况下差异应在微秒级 (< 0.000001 秒)
+
+
+四、PTP 端口状态检查
+--------------------------------------------------------------------------------
+
+=== 1. 检查 PTP 端口状态 ==========================================================
+
+pmc -u -b 0 -d eno1 'GET PORT_DATA_SET'
+
+输出示例:
+  portIdentity            ...
+  portState               SLAVE
+  logMinDelayReqInterval  0
+
+关键: portState 应显示 SLAVE (从模式)
+
+=== 2. 检查 PTP 主时钟信息 ========================================================
+
+pmc -u -b 0 -d eno1 'GET CURRENT_DATA SET'
+
+输出示例:
+  stepsRemoved        1
+  offsetFromMaster    -123.456
+  meanPathDelay       234.567
+
+
+五、实时偏移监控
+--------------------------------------------------------------------------------
+
+=== 1. 前台运行 phc2sys 观察实时偏移 ================================================
+
+sudo /usr/sbin/phc2sys -s eno1 -c CLOCK_REALTIME -w -u
+
+输出示例:
+  phc2sys[...].XXX: offset: +456 ns  s:0.123 ns  rms:234 ns  freq: +12.345
+  phc2sys[...].XXX: offset: +123 ns  s:0.089 ns  rms:189 ns  freq: +12.234
+
+字段说明:
+  offset - 当前时钟偏移 (纳秒)
+  s      - 单次采样标准差
+  rms    - 均方根偏差
+  freq   - 频率调整 (ppm, 百万分之一)
+
+按 Ctrl+C 退出
+
+=== 2. 长期监控脚本 ==============================================================
+
+# 监控 1 分钟，每秒记录一次
+for i in {1..60}; do
+  echo "$(date +"%H:%M:%S.%N") - $(sudo phc_ctl eno1 get | grep 'clock time')"
+  sleep 1
+done
+
+
+六、时钟精度验证
+--------------------------------------------------------------------------------
+
+=== 1. 检查系统时钟同步状态 ======================================================
+
+timedatectl status
+
+关键输出:
+  System clock synchronized: yes  (即使 NTP service 是 inactive)
+  NTP service: inactive           (确认使用 PTP)
+
+=== 2. 查看内核时钟调整参数 ========================================================
+
+adjtimex -p
+
+输出示例:
+  mode: 0
+  offset: 123
+  freq: 123456
+  maxerror: 123456
+  esterror: 12345
+  tai: 37
+
+=== 3. 检查时钟源 ==================================================================
+
+cat /sys/devices/system/clocksource/clocksource0/current_clocksource
+
+常见值: arch_sys_counter, tsc, acpi_pm
+
+
+七、精度指标参考
+--------------------------------------------------------------------------------
+
+指标              | 优秀        | 良好         | 需关注
+------------------|-------------|--------------|------------------
+offset (偏移)     | < 100 ns    | < 1 μs       | > 10 μs
+rms (稳定性)      | < 200 ns    | < 500 ns     | > 1 μs
+freq (频率偏差)   | < 50 ppm    | < 100 ppm    | > 200 ppm
+
+
+八、故障排查
+--------------------------------------------------------------------------------
+
+=== 现象: offset 持续增大 ==========================================================
+
+可能原因:
+  - ptp4l 未正常同步到主时钟
+  - 网络延迟不稳定
+
+解决: 检查 ptp4l 状态
+  sudo systemctl status ptp4l-client.service
+  sudo journalctl -u ptp4l-client.service -f
+
+=== 现象: phc2sys 无法启动 ========================================================
+
+可能原因:
+  - 网卡不支持硬件 PTP
+  - phc2sys@eno1 服务配置问题
+
+解决: 检查网卡 PHC 支持
+  ethtool -T eno1
+
+应包含:
+  hardware-receive: yes
+  hardware-transmit: yes
+
+=== 现象: 时间频繁跳跃 ============================================================
+
+可能原因:
+  - systemd-timesyncd 未完全禁用
+  - 多个时间服务同时运行
+
+解决: 确认只有一个服务在调整系统时钟
+  sudo systemctl status systemd-timesyncd phc2sys@eno1 chrony ntpd
+
+
+九、完整验证流程
+--------------------------------------------------------------------------------
+
+# 执行完整验证
+sudo bash << 'EOF'
+echo "=========================================="
+echo "1. 服务状态检查"
+echo "=========================================="
+systemctl status phc2sys@eno1.service --no-pager | head -3
+systemctl status systemd-timesyncd.service --no-pager | head -3
+
+echo -e "\n=========================================="
+echo "2. timedatectl 状态"
+echo "=========================================="
+timedatectl status
+
+echo -e "\n=========================================="
+echo "3. phc2sys 最新日志"
+echo "=========================================="
+journalctl -u phc2sys@eno1.service --no-pager -n 5
+
+echo -e "\n=========================================="
+echo "4. 时钟对比"
+echo "=========================================="
+echo "PHC: $(phc_ctl eno1 get 2>/dev/null | grep 'clock time' || echo '无法读取')"
+echo "SYS: $(date +'%Y-%m-%d %H:%M:%S.%N')"
+
+echo -e "\n=========================================="
+echo "5. PTP 端口状态"
+echo "=========================================="
+pmc -u -b 0 -d eno1 'GET PORT_DATA_SET' 2>/dev/null | grep portState || echo '无法读取'
+
+echo -e "\n验证完成"
+EOF

@@ -1,0 +1,28 @@
+时间来源摘要
+==================================================
+
+项目                    | 值
+------------------------|----------------------------------
+当前时间                | 2026-02-06 11:22:22 CET
+时区                    | Europe/Berlin (CET, +0100)
+NTP 服务                | systemd-timesyncd (运行中)
+时间服务器              | 93.241.86.156 (1.pool.ntp.org)
+同步状态                | 已同步
+Stratum                 | 1 (一级时间源)
+
+详细信息:
+--------------------------------------------------
+时间是通过 systemd-timesyncd 服务从 NTP 服务器同步的，
+具体连接的是 1.pool.ntp.org (IP: 93.241.86.156)，
+这是一个 Stratum 1 的高精度时间源。
+
+配置文件:
+- /etc/timezone -> Europe/Berlin
+- /etc/localtime -> /usr/share/zoneinfo/Europe/Berlin
+
+NTP 服务状态:
+- 服务: systemd-timesyncd.service
+- 状态: active (running)
+- Poll interval: 17min 4s
+- Root distance: 1.022ms
+- Offset: +34.701ms

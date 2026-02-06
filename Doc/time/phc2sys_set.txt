@@ -1,0 +1,18 @@
+# 1. 复制服务文件到系统目录
+sudo cp phc2sys-client.service /etc/systemd/system/
+
+# 2. 复制配置文件 (可选)
+sudo cp phc2sys-client.conf /etc/linuxptp/
+
+# 3. 重新加载 systemd
+sudo systemctl daemon-reload
+
+# 4. 启用并启动服务
+sudo systemctl enable phc2sys-client.service
+sudo systemctl start phc2sys-client.service
+
+# 5. 禁用 systemd-timesyncd 避免冲突
+sudo timedatectl set-ntp false
+
+# 6. 检查状态
+sudo systemctl status phc2sys-client.service
