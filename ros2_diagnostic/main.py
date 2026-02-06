@@ -1478,7 +1478,7 @@ CHANNEL_CONFIG = {
         "cache_ttl": 5,
     },
     Channel.ROS2_CONTROL: {
-        "interval": 5,
+        "interval": 1,
         "priority": "medium",
         "cache_ttl": 3,
     },

@@ -204,7 +204,11 @@ function handleFullState(data, timestamp) {
     if (typeof updateRosbagDisplay === 'function') updateRosbagDisplay(data.rosbag);
     if (typeof updateAlertsDisplay === 'function') updateAlertsDisplay(data.alerts);
 
-    markInitialDataUpdated();
+    if (data.sensors && hasSensorUI()) {
+        markInitialDataUpdated();
+    } else if (!hasSensorUI()) {
+        markInitialDataUpdated();
+    }
     updateLastUpdated();
 }
 
@@ -239,7 +243,9 @@ function handleStateUpdate(data, timestamp) {
         checkForNewAlertsFromWS(data.alerts);
     }
 
-    markInitialDataUpdated();
+    if (!hasSensorUI()) {
+        markInitialDataUpdated();
+    }
     updateLastUpdated();
 }
 
@@ -284,6 +290,9 @@ function handleSensorsUpdate(data, timestamp) {
         }
     }
     if (typeof updateSensorsDisplay === 'function') updateSensorsDisplay(data);
+    if (hasSensorUI()) {
+        markInitialDataUpdated();
+    }
     updateLastUpdated();
 }
 
@@ -412,6 +421,11 @@ function updateLastUpdated() {
         const now = new Date();
         el.textContent = now.toLocaleTimeString();
     }
+}
+
+function hasSensorUI() {
+    return !!(document.getElementById('sensorsTableBody') ||
+        document.getElementById('naviLidarStatusBadge'));
 }
 
 function showInitialDataPending() {
