@@ -113,22 +113,29 @@ setInterval(updateSensorsLastUpdate, 1000);
 
 // Override main.js placeholder functions with actual implementations
 function updateSensorsDisplay(sensorsData) {
-    if (!sensorsData || !sensorsData.sensors) return;
+    if (!sensorsData) return;
 
-    const sensors = sensorsData.sensors;
+    const partial = sensorsData.partial === true;
+    const sensors = sensorsData.sensors || {};
     const tableBody = document.getElementById('sensorsTableBody');
     const countEl = document.getElementById('sensorsCount');
 
     if (!tableBody) return;
 
-    // Update cache
-    sensorsCache = sensors;
+    // Update cache (merge for partial updates)
+    if (partial) {
+        sensorsCache = { ...sensorsCache, ...sensors };
+    } else {
+        sensorsCache = sensors;
+    }
+
+    const allSensors = sensorsCache;
 
     // Track counts
     const counts = { ok: 0, connected: 0, warning: 0, stopped: 0, disconnected: 0, critical: 0 };
 
     // Update each sensor row
-    for (const [sensorName, sensorData] of Object.entries(sensors)) {
+    for (const [sensorName, sensorData] of Object.entries(allSensors)) {
         const status = sensorData.status || 'stopped';
         // For thruster, use 'value' field (UDP heartbeat) instead of 'connected' (ping)
         // For other sensors, use 'connected' field

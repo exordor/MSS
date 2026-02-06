@@ -5,6 +5,8 @@
 
 // Current sensor tab
 let currentSensor = 'navi_lidar';
+// Cache for incremental updates
+let sensorsCache = {};
 
 // ==========================================
 // Initialization
@@ -49,17 +51,26 @@ function switchSensorTab(sensor) {
 
 // Override main.js placeholder function to handle sensor updates
 function updateSensorsDisplay(sensorsData) {
-    if (!sensorsData || !sensorsData.sensors) return;
+    if (!sensorsData) return;
 
-    const sensors = sensorsData.sensors;
+    const partial = sensorsData.partial === true;
+    const sensors = sensorsData.sensors || {};
+
+    if (partial) {
+        sensorsCache = { ...sensorsCache, ...sensors };
+    } else {
+        sensorsCache = sensors;
+    }
+
+    const allSensors = sensorsCache;
 
     // Update each sensor panel
-    updateNaviLidarPanel(sensors.navi_lidar);
-    updateUliLidarPanel(sensors.uli_lidar);
-    updateCameraPanel(sensors.camera);
-    updateImuPanel(sensors.imu);
-    updateThrusterPanel(sensors.thruster);
-    updateBatteryPanel(sensors.battery);
+    updateNaviLidarPanel(allSensors.navi_lidar);
+    updateUliLidarPanel(allSensors.uli_lidar);
+    updateCameraPanel(allSensors.camera);
+    updateImuPanel(allSensors.imu);
+    updateThrusterPanel(allSensors.thruster);
+    updateBatteryPanel(allSensors.battery);
 }
 
 function updateNaviLidarPanel(data) {

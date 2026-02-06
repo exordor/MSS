@@ -269,8 +269,21 @@ function handleAlert(data, timestamp) {
 function handleSensorsUpdate(data, timestamp) {
     // Handle sensors channel update
     console.log('[WS] Received sensors update');
-    if (data.sensors) latestState.sensors = data.sensors;
-    if (typeof updateSensorsDisplay === 'function') updateSensorsDisplay(data.sensors);
+    if (data && data.sensors) {
+        if (data.partial && latestState.sensors && latestState.sensors.sensors) {
+            latestState.sensors.sensors = {
+                ...latestState.sensors.sensors,
+                ...data.sensors
+            };
+        } else if (data.partial && (!latestState.sensors || !latestState.sensors.sensors)) {
+            latestState.sensors = {
+                sensors: { ...data.sensors }
+            };
+        } else {
+            latestState.sensors = data;
+        }
+    }
+    if (typeof updateSensorsDisplay === 'function') updateSensorsDisplay(data);
     updateLastUpdated();
 }
 

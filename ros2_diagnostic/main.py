@@ -903,6 +903,77 @@ async def collect_sensor_status_parallel() -> Dict[str, Any]:
     return result
 
 
+def _summarize_sensor_results(sensors: Dict[str, Any]) -> Dict[str, Any]:
+    """Summarize sensor results into overall status and summary string."""
+    statuses = [s.get('status') for s in sensors.values()]
+    if 'critical' in statuses:
+        overall = 'critical'
+    elif 'warning' in statuses:
+        overall = 'warning'
+    elif 'unknown' in statuses:
+        overall = 'unknown'
+    else:
+        overall = 'ok'
+
+    ok_count = sum(1 for s in sensors.values() if s.get('status') == 'ok')
+
+    return {
+        'sensors': sensors,
+        'overall': overall,
+        'summary': f"{ok_count}/{len(sensors)} OK",
+    }
+
+
+async def _broadcast_sensors_incremental() -> Dict[str, Any]:
+    """Broadcast sensor updates incrementally as each check completes."""
+    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery']
+    tasks = {asyncio.create_task(check_sensor_async(name)): name for name in sensor_names}
+    sensors: Dict[str, Any] = {}
+
+    for task in asyncio.as_completed(tasks):
+        name = tasks[task]
+        try:
+            result = await task
+        except Exception as e:
+            logger.debug(f"Error collecting {name}: {e}")
+            result = {
+                'status': 'unknown',
+                'color': '#6b7280',
+                'value': 'N/A',
+                'message': str(e),
+                'connected': '--',
+            }
+
+        sensors[name] = result
+
+        await manager.broadcast_to_channel(
+            Channel.SENSORS,
+            {
+                "type": "sensors_update",
+                "data": {
+                    "sensors": {name: result},
+                    "partial": True
+                },
+                "timestamp": time.time()
+            }
+        )
+
+    # Final full summary update (keeps backward compatibility)
+    result = _summarize_sensor_results(sensors)
+    _cache_set('sensors:status', result)
+
+    await manager.broadcast_to_channel(
+        Channel.SENSORS,
+        {
+            "type": "sensors_update",
+            "data": result,
+            "timestamp": time.time()
+        }
+    )
+
+    return result
+
+
 def collect_ros2_status_cached() -> Dict[str, Any]:
     """Collect ROS2 status with caching (TTL from config)."""
     cache_key = 'ros2:status'
@@ -1493,29 +1564,32 @@ async def _channel_broadcaster_loop(channel: Channel, interval: float) -> None:
         start = time.monotonic()
         try:
             async with in_flight:
-                collect_start = time.monotonic()
-                data = await _collect_channel_data(channel)
-                collect_end = time.monotonic()
+                if channel == Channel.SENSORS:
+                    await _broadcast_sensors_incremental()
+                else:
+                    collect_start = time.monotonic()
+                    data = await _collect_channel_data(channel)
+                    collect_end = time.monotonic()
 
-                broadcast_start = time.monotonic()
-                await manager.broadcast_to_channel(
-                    channel,
-                    {
-                        "type": f"{channel.value}_update",
-                        "data": data,
-                        "timestamp": time.time()
-                    }
-                )
-                broadcast_end = time.monotonic()
+                    broadcast_start = time.monotonic()
+                    await manager.broadcast_to_channel(
+                        channel,
+                        {
+                            "type": f"{channel.value}_update",
+                            "data": data,
+                            "timestamp": time.time()
+                        }
+                    )
+                    broadcast_end = time.monotonic()
 
-                total_ms = (broadcast_end - start) * 1000.0
-                collect_ms = (collect_end - collect_start) * 1000.0
-                broadcast_ms = (broadcast_end - broadcast_start) * 1000.0
-                logger.debug(
-                    f"[WS] {channel.value} timing: collect={collect_ms:.1f}ms "
-                    f"broadcast={broadcast_ms:.1f}ms total={total_ms:.1f}ms "
-                    f"interval={interval:.2f}s"
-                )
+                    total_ms = (broadcast_end - start) * 1000.0
+                    collect_ms = (collect_end - collect_start) * 1000.0
+                    broadcast_ms = (broadcast_end - broadcast_start) * 1000.0
+                    logger.debug(
+                        f"[WS] {channel.value} timing: collect={collect_ms:.1f}ms "
+                        f"broadcast={broadcast_ms:.1f}ms total={total_ms:.1f}ms "
+                        f"interval={interval:.2f}s"
+                    )
         except Exception as e:
             logger.error(f"Error collecting {channel.value} data: {e}")
 
