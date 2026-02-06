@@ -23,6 +23,7 @@ class CameraDiagnostic(BaseDiagnostic):
         super().__init__("camera", config)
         self.ips = config.get('SENSOR_IPS', {})
         self.topics = config.get('ROS2_TOPICS', {}).get('camera', {})
+        self.thresholds = config.get('SENSOR_THRESHOLDS', {}).get('camera', {})
 
         self.camera_ip = self.ips.get('camera', '192.168.0.11')
         self.image_topic = self.topics.get('image_raw', '/image_raw')
@@ -37,8 +38,8 @@ class CameraDiagnostic(BaseDiagnostic):
         # Connection state caching for resilience against transient failures
         self._last_successful_connection = 0
         self._consecutive_failures = 0
-        self._connection_grace_period = 30
-        self._max_consecutive_failures = 3
+        self._connection_grace_period = float(self.thresholds.get('connection_grace_period', 30))
+        self._max_consecutive_failures = int(self.thresholds.get('max_consecutive_failures', 3))
 
         # Track previous connection state for disconnection alerts
         self._was_connected = True  # Assume connected on startup

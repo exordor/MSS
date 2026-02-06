@@ -81,7 +81,7 @@ sensors:
     navi_lidar:
       min_frequency: 8.0           # Minimum point cloud publish rate (Hz)
       max_packet_loss: 1.0         # Maximum acceptable packet loss (%)
-      udp_timeout: 5.0             # UDP connection timeout (seconds)
+      udp_timeout: 2.0             # UDP connection timeout (seconds)
       min_points_per_frame: 50000  # Minimum expected points per scan
 
     # U-LiDAR thresholds (network connectivity test only, no ROS driver)
@@ -92,8 +92,10 @@ sensors:
       min_frequency: 1.5           # Minimum frame rate (FPS)
       max_frequency: 2.5           # Maximum frame rate (FPS)
       max_latency: 500             # Maximum image latency (milliseconds)
-      gige_timeout: 5.0            # GigE connection timeout (seconds)
+      gige_timeout: 2.0            # GigE connection timeout (seconds)
       expected_resolution: [4096, 3000]  # [width, height] in pixels
+      connection_grace_period: 3.0 # Seconds to keep cached connectivity after last success
+      max_consecutive_failures: 1  # Failures before declaring disconnected
 
     # IMU thresholds (only topic existence and one-time data check)
     imu: {}
@@ -208,7 +210,7 @@ monitoring:
   # Cache TTL (Time-To-Live) for different data types (seconds)
   cache_ttl:
     ros2: 3                # ROS2 node list cache
-    sensors: 1             # Sensor diagnostic results cache (实时更新)
+    sensors: 0.2             # Sensor diagnostic results cache (实时更新)
     topics: 3              # Topic info cache
     frequency: 5           # Frequency measurement cache
 

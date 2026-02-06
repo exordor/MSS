@@ -162,14 +162,21 @@ def check_gige_camera_arp(camera_ip: str) -> Dict[str, Any]:
                             'method': 'arp',
                             'state': 'FAILED'
                         }
-                    # Check for valid states with MAC address
-                    has_mac = 'lladdr' in line
-                    if 'REACHABLE' in line or 'STALE' in line or 'DELAY' in line:
+                    # Only treat REACHABLE as a confirmed connection.
+                    # STALE/DELAY/PROBE can persist after disconnect; let ping confirm.
+                    if 'REACHABLE' in line:
                         return {
                             'host': camera_ip,
                             'reachable': True,
                             'method': 'arp',
                             'state': 'REACHABLE'
+                        }
+                    if 'STALE' in line or 'DELAY' in line or 'PROBE' in line:
+                        return {
+                            'host': camera_ip,
+                            'reachable': False,
+                            'method': 'arp',
+                            'state': 'STALE'
                         }
         return {
             'host': camera_ip,
@@ -185,9 +192,10 @@ def check_gige_camera_arp(camera_ip: str) -> Dict[str, Any]:
                     if camera_ip in line:
                         parts = line.split()
                         if len(parts) >= 6 and parts[3] != '00:00:00:00:00:00':
+                            # Entry exists but may be stale; let ping confirm.
                             return {
                                 'host': camera_ip,
-                                'reachable': True,
+                                'reachable': False,
                                 'method': 'arp',
                                 'state': 'found'
                             }
@@ -211,4 +219,3 @@ def check_gige_camera_arp(camera_ip: str) -> Dict[str, Any]:
             'method': 'arp',
             'error': str(e)
         }
-
