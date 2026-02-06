@@ -143,3 +143,10 @@ notes/
 ###############################################################################
 # End of File
 ###############################################################################
+node_modules/
+ros2_ws/src/Computations/
+ros2_ws/src/Resources/
+ros2_ws/src/Utilities/
+ros2_ws/src/ui_files/
+ros2_ws/src/ros_interface/
+ros2_ws/src/src/
