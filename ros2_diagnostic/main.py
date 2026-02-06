@@ -927,20 +927,25 @@ def _summarize_sensor_results(sensors: Dict[str, Any]) -> Dict[str, Any]:
 async def _broadcast_sensors_incremental() -> Dict[str, Any]:
     """Broadcast sensor updates incrementally as each check completes."""
     sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery']
-    tasks = {asyncio.create_task(check_sensor_async(name)): name for name in sensor_names}
+
+    async def _run_sensor_check(name: str):
+        try:
+            return name, await check_sensor_async(name)
+        except Exception as e:
+            return name, e
+
+    tasks = [asyncio.create_task(_run_sensor_check(name)) for name in sensor_names]
     sensors: Dict[str, Any] = {}
 
     for task in asyncio.as_completed(tasks):
-        name = tasks[task]
-        try:
-            result = await task
-        except Exception as e:
-            logger.debug(f"Error collecting {name}: {e}")
+        name, result = await task
+        if isinstance(result, Exception):
+            logger.debug(f"Error collecting {name}: {result}")
             result = {
                 'status': 'unknown',
                 'color': '#6b7280',
                 'value': 'N/A',
-                'message': str(e),
+                'message': str(result),
                 'connected': '--',
             }
 
