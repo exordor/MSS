@@ -1376,55 +1376,90 @@ async def background_broadcaster():
             await asyncio.sleep(10)
 
 
-async def background_broadcaster_channelized():
-    """分频道的后台广播器 - 不同频道使用不同更新频率"""
-    last_update = {channel: 0 for channel in Channel}
+async def _collect_channel_data(channel: Channel) -> Dict[str, Any]:
+    """Collect channel data without blocking the event loop."""
+    if channel == Channel.SENSORS:
+        return await collect_sensor_status_parallel()
+    if channel == Channel.ROS2:
+        return await asyncio.to_thread(collect_ros2_status_cached)
+    if channel == Channel.ROS2_CONTROL:
+        return await asyncio.to_thread(collect_ros2_control_status)
+    if channel == Channel.ROSBAG:
+        return await asyncio.to_thread(collect_rosbag_status)
+    return {}
+
+
+async def _channel_broadcaster_loop(channel: Channel, interval: float) -> None:
+    """Per-channel broadcaster loop with fixed interval scheduling."""
+    next_run = time.monotonic()
+    in_flight = asyncio.Lock()
 
     while True:
-        now = time.time()
-        broadcast_tasks = []
+        now = time.monotonic()
+        if now < next_run:
+            await asyncio.sleep(next_run - now)
 
-        for channel, config in CHANNEL_CONFIG.items():
-            interval = config["interval"]
+        # Re-entrancy guard: if a previous cycle is still running, skip this tick.
+        if in_flight.locked():
+            logger.debug(f"[WS] {channel.value} cycle skipped: previous run still in flight")
+            next_run += interval
+            if next_run < time.monotonic():
+                next_run = time.monotonic() + interval
+            continue
 
-            # 实时告警由回调处理，跳过
-            if interval == 0:
-                continue
+        start = time.monotonic()
+        try:
+            async with in_flight:
+                collect_start = time.monotonic()
+                data = await _collect_channel_data(channel)
+                collect_end = time.monotonic()
 
-            # 检查是否需要更新
-            if now - last_update[channel] >= interval:
-                # 根据频道收集数据
-                try:
-                    if channel == Channel.SENSORS:
-                        data = await collect_sensor_status_parallel()
-                    elif channel == Channel.ROS2:
-                        data = collect_ros2_status_cached()
-                    elif channel == Channel.ROS2_CONTROL:
-                        data = collect_ros2_control_status()
-                    elif channel == Channel.ROSBAG:
-                        data = collect_rosbag_status()
-                    else:
-                        continue
+                broadcast_start = time.monotonic()
+                await manager.broadcast_to_channel(
+                    channel,
+                    {
+                        "type": f"{channel.value}_update",
+                        "data": data,
+                        "timestamp": time.time()
+                    }
+                )
+                broadcast_end = time.monotonic()
 
-                    broadcast_tasks.append(
-                        manager.broadcast_to_channel(
-                            channel,
-                            {
-                                "type": f"{channel.value}_update",
-                                "data": data,
-                                "timestamp": now
-                            }
-                        )
-                    )
-                    last_update[channel] = now
-                except Exception as e:
-                    logger.error(f"Error collecting {channel.value} data: {e}")
+                total_ms = (broadcast_end - start) * 1000.0
+                collect_ms = (collect_end - collect_start) * 1000.0
+                broadcast_ms = (broadcast_end - broadcast_start) * 1000.0
+                logger.debug(
+                    f"[WS] {channel.value} timing: collect={collect_ms:.1f}ms "
+                    f"broadcast={broadcast_ms:.1f}ms total={total_ms:.1f}ms "
+                    f"interval={interval:.2f}s"
+                )
+        except Exception as e:
+            logger.error(f"Error collecting {channel.value} data: {e}")
 
-        # 并发广播
-        if broadcast_tasks:
-            await asyncio.gather(*broadcast_tasks, return_exceptions=True)
+        # Schedule next run; avoid backlog if we're behind
+        next_run += interval
+        if next_run < time.monotonic():
+            next_run = time.monotonic() + interval
 
-        await asyncio.sleep(1)  # 1 秒轮询
+
+async def background_broadcaster_channelized():
+    """分频道的后台广播器 - 不同频道使用不同更新频率"""
+    tasks = []
+
+    for channel, config in CHANNEL_CONFIG.items():
+        interval = config["interval"]
+
+        # 实时告警由回调处理，跳过
+        if interval == 0:
+            continue
+
+        tasks.append(asyncio.create_task(_channel_broadcaster_loop(channel, interval)))
+
+    if not tasks:
+        return
+
+    # Keep all channel loops alive
+    await asyncio.gather(*tasks)
 
 
 def background_collector_thread():
