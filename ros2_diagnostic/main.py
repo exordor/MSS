@@ -799,8 +799,11 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
         final_color = summary['color']
         final_message = summary.get('message', '')
 
-        if sensor_name != 'uli_lidar' and node_available is not None:
-            if node_available and topic_available:
+        physical_connected = (connected == 'Connected')
+
+        # Only upgrade status when physical connectivity is confirmed
+        if sensor_name not in ['uli_lidar', 'battery'] and node_available is not None:
+            if physical_connected and node_available and topic_available:
                 # Both node and topic available - status is OK
                 final_status = 'ok'
                 final_color = 'green'
@@ -815,14 +818,10 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
                 display_name = sensor_display_names.get(sensor_name, sensor_name)
                 if 'connected' in summary['status']:
                     final_message = f"{display_name} - OK (node and topic active)"
-            elif node_available and not topic_available:
-                # Node running but no topic data
+            elif physical_connected and node_available and not topic_available:
+                # Node running but no topic data (only if physically connected)
                 final_status = 'connected'
                 final_color = 'blue'
-            elif not node_available:
-                # Node not running - use original status
-                final_status = summary['status']
-                final_color = summary['color']
 
         return {
             'status': final_status,
