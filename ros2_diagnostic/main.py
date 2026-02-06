@@ -800,6 +800,10 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
         final_message = summary.get('message', '')
 
         physical_connected = (connected == 'Connected')
+        if not physical_connected and connected == 'Disconnected':
+            final_status = 'disconnected'
+            final_color = 'red'
+            final_message = summary.get('message', '') or 'Sensor disconnected'
 
         # Only upgrade status when physical connectivity is confirmed
         if sensor_name not in ['uli_lidar', 'battery'] and node_available is not None:
