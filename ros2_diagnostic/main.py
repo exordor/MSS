@@ -205,18 +205,22 @@ class ConnectionManager:
         """向订阅了特定频道的客户端广播"""
         disconnected = []
 
+        # Get connections that are subscribed to this channel
         with self._lock:
-            for ws, info in self.connections.items():
-                if channel in info.channels:
-                    try:
-                        await ws.send_json(message)
-                    except Exception as e:
-                        logger.debug(f"[WS] Send failed: {e}")
-                        disconnected.append(ws)
+            target_connections = [(ws, info) for ws, info in self.connections.items()
+                                  if channel in info.channels]
+
+        # Send to all target connections (outside lock to avoid blocking)
+        for ws, info in target_connections:
+            try:
+                await ws.send_json(message)
+            except Exception as e:
+                logger.debug(f"[WS] Send failed: {e}")
+                disconnected.append(ws)
 
         # 清理断开的连接
         for ws in disconnected:
-            await self.disconnect(ws)
+            await self._async_disconnect(ws)
 
     def disconnect(self, websocket: WebSocket):
         """Remove a WebSocket connection"""
@@ -231,21 +235,34 @@ class ConnectionManager:
             await websocket.send_json(message)
         except Exception as e:
             logger.error(f"Error sending to WebSocket: {e}")
-            self.disconnect(websocket)
+            await self._async_disconnect(websocket)
 
     async def broadcast(self, message: dict):
         """Broadcast a message to all connected WebSocket clients (legacy, for alerts)"""
         disconnected = []
-        for connection, info in self.connections.items():
+
+        # Copy connections list to avoid modification during iteration
+        with self._lock:
+            connections = list(self.connections.items())
+
+        # Send to all connections (outside lock to avoid blocking)
+        for connection, info in connections:
             try:
                 await connection.send_json(message)
             except Exception as e:
                 logger.debug(f"Failed to send to connection: {e}")
                 disconnected.append(connection)
 
-        # Remove disconnected clients
+        # Remove disconnected clients (with proper locking)
         for ws in disconnected:
-            self.disconnect(ws)
+            await self._async_disconnect(ws)
+
+    async def _async_disconnect(self, websocket: WebSocket):
+        """Async version of disconnect for use within async context"""
+        with self._lock:
+            if websocket in self.connections:
+                del self.connections[websocket]
+        logger.info(f"[WS] Disconnected. Total: {len(self.connections)}")
 
     async def send_full_state(self, websocket: WebSocket, channels: Set[Channel] = None):
         """Send complete system state to a newly connected client.
