@@ -14,7 +14,10 @@ from typing import Optional, Dict, Any
 
 
 class ROS2Controller:
-    """Manages ROS2 sensor driver lifecycle"""
+    """Manages ROS2 sensor driver lifecycle with idempotent operations"""
+
+    # Operation cooldown to prevent rapid repeated calls
+    OPERATION_COOLDOWN = 2.0  # seconds
 
     def __init__(self, config: dict):
         self.config = config
@@ -36,6 +39,9 @@ class ROS2Controller:
             'pid': None,
             'message': 'Checking status...'
         }
+        # Track last operation time for idempotency
+        self._last_start_time = 0.0
+        self._last_stop_time = 0.0
 
     def check_running(self) -> Dict[str, Any]:
         """Check if ROS2 is currently running"""
@@ -77,17 +83,33 @@ class ROS2Controller:
             }
 
     def start(self) -> Dict[str, Any]:
-        """Start ROS2 sensor drivers"""
+        """Start ROS2 sensor drivers (idempotent operation)"""
         with self._lock:
+            current_time = time.time()
+
+            # Idempotency check: cooldown period
+            if current_time - self._last_start_time < self.OPERATION_COOLDOWN:
+                remaining = round(self.OPERATION_COOLDOWN - (current_time - self._last_start_time), 1)
+                return {
+                    'success': False,
+                    'message': f'Start operation in progress, please wait {remaining}s'
+                }
+
             # Check if already running
             status = self.check_running()
             if status['running']:
+                self._last_start_time = current_time
                 return {
-                    'success': False,
-                    'message': 'ROS2 is already running'
+                    'success': True,  # Return success for idempotency
+                    'message': f'ROS2 is already running (PID: {status["pid"]})',
+                    'already_running': True,
+                    'pid': status['pid']
                 }
 
             try:
+                # Mark operation start time
+                self._last_start_time = current_time
+
                 # Ensure log directory exists
                 os.makedirs(os.path.dirname(self.log_file_path), exist_ok=True)
 
@@ -129,14 +151,28 @@ class ROS2Controller:
                     self._log_file = None
                 self._status['running'] = False
                 self._status['pid'] = None
+                self._last_start_time = 0  # Reset on error to allow retry
                 return {
                     'success': False,
                     'message': f'Failed to start ROS2: {str(e)}'
                 }
 
     def stop(self) -> Dict[str, Any]:
-        """Stop ROS2 sensor drivers"""
+        """Stop ROS2 sensor drivers (idempotent operation)"""
         with self._lock:
+            current_time = time.time()
+
+            # Idempotency check: cooldown period
+            if current_time - self._last_stop_time < self.OPERATION_COOLDOWN:
+                remaining = round(self.OPERATION_COOLDOWN - (current_time - self._last_stop_time), 1)
+                return {
+                    'success': False,
+                    'message': f'Stop operation in progress, please wait {remaining}s'
+                }
+
+            # Mark operation start time
+            self._last_stop_time = current_time
+
             killed_count = 0
 
             try:
@@ -208,14 +244,17 @@ class ROS2Controller:
                         'message': f'ROS2 stopped (killed {killed_count} process(es))'
                     }
                 else:
-                    self._status['message'] = 'No ROS2 processes found'
+                    # Idempotency: no processes found is OK (already stopped)
+                    self._status['message'] = 'ROS2 is not running'
                     return {
-                        'success': False,
-                        'message': 'No ROS2 processes found'
+                        'success': True,  # Return success for idempotency
+                        'message': 'ROS2 is not running (already stopped)',
+                        'already_stopped': True
                     }
 
             except Exception as e:
                 self._status['message'] = f'Error stopping ROS2: {str(e)}'
+                self._last_stop_time = 0  # Reset on error to allow retry
                 return {
                     'success': False,
                     'message': f'Error stopping ROS2: {str(e)}'

@@ -490,26 +490,63 @@ function updateROS2ControlStatusFromData(status) {
     const startBtn = document.getElementById('startRos2Btn');
     const stopBtn = document.getElementById('stopRos2Btn');
 
+    // Reset operation flags when status confirms the operation completed
+    if (status.running && ros2OperationState.isStarting) {
+        ros2OperationState.isStarting = false;
+    }
+    if (!status.running && ros2OperationState.isStopping) {
+        ros2OperationState.isStopping = false;
+    }
+
     if (indicator) {
         indicator.className = 'status-indicator ' + (status.running ? 'ok' : 'unknown');
     }
     if (statusText) {
-        statusText.textContent = status.running ? 'Running' : 'Stopped';
+        // Don't override text if operation is in progress
+        if (!ros2OperationState.isStarting && !ros2OperationState.isStopping) {
+            statusText.textContent = status.running ? 'Running' : 'Stopped';
+        }
     }
     if (detailEl) {
         detailEl.textContent = status.running ?
             `PID: ${status.pid || 'Unknown'}` : 'ROS2 drivers stopped';
     }
     if (startBtn && stopBtn) {
-        startBtn.disabled = status.running;
-        stopBtn.disabled = !status.running;
+        // Only update button states if no operation is in progress
+        if (!ros2OperationState.isStarting && !ros2OperationState.isStopping) {
+            startBtn.disabled = status.running;
+            stopBtn.disabled = !status.running;
+        }
     }
 }
+
+// Operation state tracking for idempotency
+const ros2OperationState = {
+    isStarting: false,
+    isStopping: false,
+    lastStartAttempt: 0,
+    lastStopAttempt: 0,
+    OPERATION_COOLDOWN: 3000  // 3 seconds cooldown between operations
+};
 
 async function startROS2() {
     const startBtn = document.getElementById('startRos2Btn');
     const statusText = document.getElementById('ros2ControlStatusText');
 
+    // Idempotency check: prevent duplicate requests
+    const now = Date.now();
+    if (ros2OperationState.isStarting) {
+        console.log('Start operation already in progress, ignoring duplicate request');
+        return;
+    }
+    if (now - ros2OperationState.lastStartAttempt < ros2OperationState.OPERATION_COOLDOWN) {
+        const remaining = Math.ceil((ros2OperationState.OPERATION_COOLDOWN - (now - ros2OperationState.lastStartAttempt)) / 1000);
+        showNotification('warning', `Please wait ${remaining} second(s) before starting again`);
+        return;
+    }
+
+    ros2OperationState.isStarting = true;
+    ros2OperationState.lastStartAttempt = now;
     startBtn.disabled = true;
     if (statusText) statusText.textContent = 'Starting...';
 
@@ -518,15 +555,18 @@ async function startROS2() {
 
         if (result.success) {
             showNotification('success', result.message || 'ROS2 starting...');
+            // Keep button disabled until status updates via WebSocket
         } else {
             showNotification('error', 'Failed to start ROS2: ' + (result.message || 'Unknown error'));
             startBtn.disabled = false;
+            ros2OperationState.isStarting = false;
             if (statusText) statusText.textContent = 'Start Failed';
         }
     } catch (error) {
         console.error('Error starting ROS2:', error);
         showNotification('error', 'Error starting ROS2: ' + error.message);
         startBtn.disabled = false;
+        ros2OperationState.isStarting = false;
         if (statusText) statusText.textContent = 'Error';
     }
 }
@@ -535,6 +575,20 @@ async function stopROS2() {
     const stopBtn = document.getElementById('stopRos2Btn');
     const statusText = document.getElementById('ros2ControlStatusText');
 
+    // Idempotency check: prevent duplicate requests
+    const now = Date.now();
+    if (ros2OperationState.isStopping) {
+        console.log('Stop operation already in progress, ignoring duplicate request');
+        return;
+    }
+    if (now - ros2OperationState.lastStopAttempt < ros2OperationState.OPERATION_COOLDOWN) {
+        const remaining = Math.ceil((ros2OperationState.OPERATION_COOLDOWN - (now - ros2OperationState.lastStopAttempt)) / 1000);
+        showNotification('warning', `Please wait ${remaining} second(s) before stopping again`);
+        return;
+    }
+
+    ros2OperationState.isStopping = true;
+    ros2OperationState.lastStopAttempt = now;
     stopBtn.disabled = true;
     if (statusText) statusText.textContent = 'Stopping...';
 
@@ -543,15 +597,18 @@ async function stopROS2() {
 
         if (result.success) {
             showNotification('success', result.message || 'ROS2 stopped');
+            // Keep button disabled until status updates via WebSocket
         } else {
             showNotification('error', 'Failed to stop ROS2: ' + (result.message || 'Unknown error'));
             stopBtn.disabled = false;
+            ros2OperationState.isStopping = false;
             if (statusText) statusText.textContent = 'Stop Failed';
         }
     } catch (error) {
         console.error('Error stopping ROS2:', error);
         showNotification('error', 'Error stopping ROS2: ' + error.message);
         stopBtn.disabled = false;
+        ros2OperationState.isStopping = false;
         if (statusText) statusText.textContent = 'Error';
     }
 }
