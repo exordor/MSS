@@ -1,14 +1,39 @@
 [Unit]
 Description=PHC to System Clock Sync (phc2sys)
+Documentation=man:phc2sys(8)
+
+# Dependencies: wait for ptp4l and network to be ready
 Wants=ptp4l-client.service network-online.target
 After=ptp4l-client.service network-online.target
 
+# Ensure NTP service is stopped to avoid conflicts
+Conflicts=systemd-timesyncd.service
+Before=systemd-timesyncd.service time-sync.target
+
 [Service]
 Type=simple
-# Sync system clock (CLOCK_REALTIME) from NIC PHC (/dev/ptp0)
-ExecStart=/usr/sbin/phc2sys -s /dev/ptp0 -c CLOCK_REALTIME -w -m -O 0
+
+# Synchronize network interface PHC time to system clock
+#
+# Parameter description:
+#   -s eno1            : Source clock (network interface PHC)
+#   -c CLOCK_REALTIME  : Target clock (system clock)
+#   -w                 : Wait for ptp4l to lock before syncing
+#
+# Note: Using minimal parameters for compatibility
+#       Default PI servo algorithm is used automatically
+#       Logs are automatically recorded to syslog
+ExecStart=/usr/sbin/phc2sys -s eno1 -c CLOCK_REALTIME -w
+
+# Auto-restart on failure
 Restart=on-failure
 RestartSec=5
+
+# Security settings
+# Note: phc2sys communicates with ptp4l via UDS, needs access to /var/run/ptp4l
+# Cannot use PrivateTmp as it isolates the filesystem namespace
+ProtectSystem=yes
+ProtectHome=yes
 
 [Install]
 WantedBy=multi-user.target
