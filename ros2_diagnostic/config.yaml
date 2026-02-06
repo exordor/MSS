@@ -98,9 +98,9 @@ sensors:
       min_frequency: 1.5           # Minimum frame rate (FPS)
       max_frequency: 2.5           # Maximum frame rate (FPS)
       max_latency: 500             # Maximum image latency (milliseconds)
-      gige_timeout: 2.0            # GigE connection timeout (seconds)
+      gige_timeout: 1.0            # GigE connection timeout (seconds)
       expected_resolution: [4096, 3000]  # [width, height] in pixels
-      connection_grace_period: 2.0 # Seconds to keep cached connectivity after last success
+      connection_grace_period: 1.0 # Seconds to keep cached connectivity after last success
       max_consecutive_failures: 1  # Failures before declaring disconnected
 
     # IMU thresholds (only topic existence and one-time data check)
