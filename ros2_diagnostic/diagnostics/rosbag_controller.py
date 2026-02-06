@@ -32,7 +32,12 @@ class RosbagController:
     Controller for rosbag recording via remote recorder ROS2 services.
     Loads topics from rosbag_ros2.yaml and provides start/stop/status functionality.
     Uses subprocess to call ros2 service call for reliable operation.
+
+    Includes idempotency protection to prevent duplicate operations.
     """
+
+    # Operation cooldown to prevent rapid repeated calls
+    OPERATION_COOLDOWN = 2.0  # seconds
 
     def __init__(self, config: dict):
         ros2_config = config.get("ROS2_CONFIG", {})
@@ -51,6 +56,8 @@ class RosbagController:
         self._current_bag_path = None
         self._start_time = None
         self._lock = threading.Lock()
+        self._last_start_time = 0.0
+        self._last_stop_time = 0.0
 
         # Load initial config
         self.load_config()
@@ -109,29 +116,46 @@ class RosbagController:
 
     def start_recording(self, topics: Optional[List[str]] = None) -> Dict[str, Any]:
         """
-        Start rosbag recording
+        Start rosbag recording (idempotent operation)
         Args:
             topics: Optional list of topics to record (default: use config topics)
         Returns:
             Dict with success, message, and optionally bag_path
         """
         with self._lock:
+            current_time = time.time()
+
+            # Idempotency check: cooldown period
+            if current_time - self._last_start_time < self.OPERATION_COOLDOWN:
+                remaining = round(self.OPERATION_COOLDOWN - (current_time - self._last_start_time), 1)
+                return {
+                    'success': False,
+                    'message': f'Start operation in progress, please wait {remaining}s'
+                }
+
             # Check if already recording
             is_recording, _, _ = self._check_recording_process()
             if is_recording:
+                self._last_start_time = current_time
                 return {
-                    'success': False,
-                    'message': 'Already recording',
+                    'success': True,  # Return success for idempotency
+                    'message': f'Already recording: {self._current_bag_path}',
+                    'already_recording': True,
                     'current_bag': self._current_bag_path
                 }
+
+            # Mark operation start time
+            self._last_start_time = current_time
 
             # Ensure config is loaded
             if not self._config:
                 if not self.load_config():
+                    self._last_start_time = 0  # Reset on error
                     return {'success': False, 'message': 'Failed to load configuration'}
 
             topics_to_record = topics or self._topics
             if not topics_to_record:
+                self._last_start_time = 0  # Reset on error
                 return {'success': False, 'message': 'No topics to record'}
 
             # Call ROS2 service via subprocess
@@ -139,26 +163,48 @@ class RosbagController:
             if result.get('success'):
                 self._current_bag_path = result.get('bag_path')
                 self._start_time = time.time()
+            else:
+                self._last_start_time = 0  # Reset on error to allow retry
 
             return result
 
     def stop_recording(self) -> Dict[str, Any]:
         """
-        Stop rosbag recording
+        Stop rosbag recording (idempotent operation)
         Returns:
             Dict with success and message
         """
         with self._lock:
+            current_time = time.time()
+
+            # Idempotency check: cooldown period
+            if current_time - self._last_stop_time < self.OPERATION_COOLDOWN:
+                remaining = round(self.OPERATION_COOLDOWN - (current_time - self._last_stop_time), 1)
+                return {
+                    'success': False,
+                    'message': f'Stop operation in progress, please wait {remaining}s'
+                }
+
+            # Mark operation start time
+            self._last_stop_time = current_time
+
             # Check if recording
             is_recording, _, _ = self._check_recording_process()
             if not is_recording:
-                return {'success': False, 'message': 'Not currently recording'}
+                # Idempotency: not recording is OK (already stopped)
+                return {
+                    'success': True,  # Return success for idempotency
+                    'message': 'No recording in progress (already stopped)',
+                    'already_stopped': True
+                }
 
             # Call ROS2 service via subprocess
             result = self._call_stop_service()
             if result.get('success'):
                 self._current_bag_path = None
                 self._start_time = None
+            else:
+                self._last_stop_time = 0  # Reset on error to allow retry
 
             return result
 

@@ -265,7 +265,17 @@ function updateRosbagDisplay(rosbagData) {
     const startBtn = document.getElementById('startRosbagBtn');
     const stopBtn = document.getElementById('stopRosbagBtn');
 
-    if (data.is_recording || data.recording) {
+    const isRecording = data.is_recording || data.recording;
+
+    // Reset operation flags when status confirms the operation completed
+    if (isRecording && rosbagOperationState.isStarting) {
+        rosbagOperationState.isStarting = false;
+    }
+    if (!isRecording && rosbagOperationState.isStopping) {
+        rosbagOperationState.isStopping = false;
+    }
+
+    if (isRecording) {
         // Recording state
         if (indicator) {
             indicator.className = 'status-indicator recording';
@@ -292,8 +302,11 @@ function updateRosbagDisplay(rosbagData) {
             startBtn.innerHTML = '<i class="fa-solid fa-circle"></i> Start';
         }
         if (stopBtn) {
-            stopBtn.disabled = false;
-            stopBtn.innerHTML = '<i class="fa-solid fa-square"></i> Stop';
+            // Only enable stop button if not in stopping state
+            if (!rosbagOperationState.isStopping) {
+                stopBtn.disabled = false;
+                stopBtn.innerHTML = '<i class="fa-solid fa-square"></i> Stop';
+            }
         }
     } else {
         // Idle state
@@ -306,8 +319,11 @@ function updateRosbagDisplay(rosbagData) {
             statusText.className = 'rosbag-status-text text-muted';
         }
         if (startBtn) {
-            startBtn.disabled = false;
-            startBtn.innerHTML = '<i class="fa-solid fa-circle"></i> Start';
+            // Only enable start button if not in starting state
+            if (!rosbagOperationState.isStarting) {
+                startBtn.disabled = false;
+                startBtn.innerHTML = '<i class="fa-solid fa-circle"></i> Start';
+            }
         }
         if (stopBtn) {
             stopBtn.disabled = true;
@@ -394,6 +410,15 @@ function updateTopicsList(ros2Data) {
 // Rosbag Recording Control
 // ==========================================
 
+// Rosbag operation state tracking for idempotency
+const rosbagOperationState = {
+    isStarting: false,
+    isStopping: false,
+    lastStartAttempt: 0,
+    lastStopAttempt: 0,
+    OPERATION_COOLDOWN: 3000  // 3 seconds cooldown
+};
+
 function initRosbagControls() {
     const startBtn = document.getElementById('startRosbagBtn');
     const stopBtn = document.getElementById('stopRosbagBtn');
@@ -421,6 +446,23 @@ async function startRosbagRecording() {
     const startBtn = document.getElementById('startRosbagBtn');
     const originalText = startBtn.innerHTML;
 
+    // Idempotency check: prevent duplicate requests
+    const now = Date.now();
+    if (rosbagOperationState.isStarting) {
+        console.log('Rosbag start operation already in progress, ignoring duplicate request');
+        return;
+    }
+    if (now - rosbagOperationState.lastStartAttempt < rosbagOperationState.OPERATION_COOLDOWN) {
+        const remaining = Math.ceil((rosbagOperationState.OPERATION_COOLDOWN - (now - rosbagOperationState.lastStartAttempt)) / 1000);
+        showNotification('warning', `Please wait ${remaining} second(s) before starting again`);
+        return;
+    }
+
+    // Note: ROS2 status check is now done on the backend for reliability
+    // This avoids issues with stale frontend state after page load
+
+    rosbagOperationState.isStarting = true;
+    rosbagOperationState.lastStartAttempt = now;
     startBtn.disabled = true;
     startBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Starting...';
 
@@ -429,16 +471,19 @@ async function startRosbagRecording() {
 
         if (result.success) {
             showNotification('success', result.message || 'Recording started');
+            // Keep button disabled until status updates via WebSocket
         } else {
             showNotification('error', 'Failed to start recording: ' + (result.message || 'Unknown error'));
             startBtn.disabled = false;
             startBtn.innerHTML = originalText;
+            rosbagOperationState.isStarting = false;
         }
     } catch (error) {
         console.error('Error starting rosbag:', error);
         showNotification('error', 'Error starting recording: ' + error.message);
         startBtn.disabled = false;
         startBtn.innerHTML = originalText;
+        rosbagOperationState.isStarting = false;
     }
 }
 
@@ -446,6 +491,20 @@ async function stopRosbagRecording() {
     const stopBtn = document.getElementById('stopRosbagBtn');
     const originalText = stopBtn.innerHTML;
 
+    // Idempotency check: prevent duplicate requests
+    const now = Date.now();
+    if (rosbagOperationState.isStopping) {
+        console.log('Rosbag stop operation already in progress, ignoring duplicate request');
+        return;
+    }
+    if (now - rosbagOperationState.lastStopAttempt < rosbagOperationState.OPERATION_COOLDOWN) {
+        const remaining = Math.ceil((rosbagOperationState.OPERATION_COOLDOWN - (now - rosbagOperationState.lastStopAttempt)) / 1000);
+        showNotification('warning', `Please wait ${remaining} second(s) before stopping again`);
+        return;
+    }
+
+    rosbagOperationState.isStopping = true;
+    rosbagOperationState.lastStopAttempt = now;
     stopBtn.disabled = true;
     stopBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Stopping...';
 
@@ -454,16 +513,19 @@ async function stopRosbagRecording() {
 
         if (result.success) {
             showNotification('success', result.message || 'Recording stopped');
+            // Keep button disabled until status updates via WebSocket
         } else {
             showNotification('error', 'Failed to stop recording: ' + (result.message || 'Unknown error'));
             stopBtn.disabled = false;
             stopBtn.innerHTML = originalText;
+            rosbagOperationState.isStopping = false;
         }
     } catch (error) {
         console.error('Error stopping rosbag:', error);
         showNotification('error', 'Error stopping recording: ' + error.message);
         stopBtn.disabled = false;
         stopBtn.innerHTML = originalText;
+        rosbagOperationState.isStopping = false;
     }
 }
 

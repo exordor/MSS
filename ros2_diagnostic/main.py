@@ -1836,6 +1836,15 @@ async def rosbag_start(request: Request) -> JSONResponse:
         data = await request.json() if request.headers.get("content-type") == "application/json" else {}
         topics = data.get('topics')  # Optional topic override
 
+        # Check if ROS2 is running before starting rosbag recording
+        ros2_controller = get_ros2_controller()
+        ros2_status = ros2_controller.check_running()
+        if not ros2_status.get('running'):
+            return JSONResponse(
+                content={"success": False, "message": 'Please start ROS2 system first before recording'},
+                status_code=400
+            )
+
         controller = get_rosbag_controller({
             'ROS2_CONFIG': ROS2_CONFIG,
             'ROSBAG_CONFIG': ROSBAG_CONFIG,
