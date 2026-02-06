@@ -296,12 +296,10 @@ function updateRosbagDisplay(rosbagData) {
         }
         if (fileEl) fileEl.textContent = data.current_bag || data.filename || 'Unknown';
         if (durationEl) {
-            if (data.duration) {
-                const mins = Math.floor(data.duration / 60);
-                const secs = data.duration % 60;
-                durationEl.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            if (data.duration !== undefined && data.duration !== null) {
+                startRosbagDurationTicker(data.duration);
             } else {
-                durationEl.textContent = '--:--';
+                startRosbagDurationTicker(0);
             }
         }
         if (topicCountEl) topicCountEl.textContent = data.topics_count || data.topic_count || 0;
@@ -344,11 +342,47 @@ function updateRosbagDisplay(rosbagData) {
             if (infoDiv) {
                 infoDiv.style.display = 'block';
                 if (fileEl) fileEl.textContent = '(not recording)';
-                if (durationEl) durationEl.textContent = '--:--';
+                if (durationEl) {
+                    stopRosbagDurationTicker();
+                    durationEl.textContent = '--:--';
+                }
             }
         } else {
             if (infoDiv) infoDiv.style.display = 'none';
         }
+    }
+}
+
+let rosbagDurationTimer = null;
+let rosbagDurationStart = null;
+
+function startRosbagDurationTicker(durationSeconds) {
+    rosbagDurationStart = Date.now() - Math.max(0, durationSeconds) * 1000;
+    updateRosbagDurationDisplay();
+    if (rosbagDurationTimer) clearInterval(rosbagDurationTimer);
+    rosbagDurationTimer = setInterval(updateRosbagDurationDisplay, 1000);
+}
+
+function stopRosbagDurationTicker() {
+    rosbagDurationStart = null;
+    if (rosbagDurationTimer) {
+        clearInterval(rosbagDurationTimer);
+        rosbagDurationTimer = null;
+    }
+}
+
+function updateRosbagDurationDisplay() {
+    const durationEl = document.getElementById('rosbagDuration');
+    if (!durationEl || rosbagDurationStart === null) return;
+
+    const elapsed = Math.max(0, Math.floor((Date.now() - rosbagDurationStart) / 1000));
+    const hours = Math.floor(elapsed / 3600);
+    const mins = Math.floor((elapsed % 3600) / 60);
+    const secs = elapsed % 60;
+    if (hours > 0) {
+        durationEl.textContent = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    } else {
+        durationEl.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
 }
 
