@@ -32,7 +32,7 @@ from config import (
     ROS2_CONFIG, ROS2_CONTROL, ROSBAG_CONFIG, SENSOR_IPS, SENSOR_THRESHOLDS,
     EXPECTED_NODES, IGNORED_NODES, SENSOR_NODES, ROS2_TOPICS,
     ENABLE_TOPIC_DETAILS, CACHE_TTL, LOG_FILES, LOG_ROOT, UI_CONFIG, PROJECT_ROOT,
-    TOOLS_CONFIG_FILES, EVENT_LOG_CONFIG
+    TOOLS_CONFIG_FILES, EVENT_LOG_CONFIG, SENSOR_I2C
 )
 from diagnostics import ROS2Monitor, ROS2Controller
 from diagnostics.rosbag_controller import get_rosbag_controller
@@ -650,6 +650,7 @@ def get_monitor(name: str):
                     'SENSOR_IPS': SENSOR_IPS,
                     'ROS2_TOPICS': ROS2_TOPICS,
                     'ENABLE_TOPIC_DETAILS': ENABLE_TOPIC_DETAILS,
+                    'SENSOR_I2C': SENSOR_I2C,
                 })
         return _monitors[name]
 
@@ -778,6 +779,14 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
             connected = 'Connected' if network.get('reachable', False) else 'Disconnected'
             latency = network.get('latency_ms', 0)
             packet_loss = network.get('packet_loss', 0)
+        elif sensor_name == 'battery':
+            i2c = metrics.get('i2c', {})
+            if i2c.get('connected') is True:
+                connected = 'Connected'
+            elif i2c.get('connected') is False:
+                connected = 'Disconnected'
+            else:
+                connected = '--'
 
         # Extract topic and node availability using helper functions
         # This ensures consistent detection across all code paths

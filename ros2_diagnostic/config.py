@@ -89,6 +89,7 @@ sensors_cfg = cfg.get("sensors", {})
 SENSOR_IPS = sensors_cfg.get("ips", {})
 SENSOR_THRESHOLDS = sensors_cfg.get("thresholds", {})
 ROS2_TOPICS = sensors_cfg.get("topics", {})
+SENSOR_I2C = sensors_cfg.get("i2c", {})
 
 nodes_cfg = cfg.get("ros2_nodes", {})
 EXPECTED_NODES = nodes_cfg.get("expected", [])

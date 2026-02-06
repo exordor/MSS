@@ -29,6 +29,7 @@ class BatteryDiagnostic(BaseDiagnostic):
         super().__init__("battery", config)
         self.topics = config.get('ROS2_TOPICS', {}).get('battery', {})
         self.thresholds = config.get('SENSOR_THRESHOLDS', {}).get('battery', {})
+        self.i2c_config = config.get('SENSOR_I2C', {}).get('battery', {})
 
         self.voltage_topic = self.topics.get('voltage', '/battery_voltage')
 
@@ -53,8 +54,92 @@ class BatteryDiagnostic(BaseDiagnostic):
         }
         self._last_data_time = 0
 
-        # Track previous connection state for disconnection alerts
+        # Track previous physical connection state (I2C) for alerts
         self._was_connected = True  # Assume connected on startup
+
+        # I2C probe configuration (independent of ROS2)
+        self.i2c_bus = self._parse_i2c_value(self.i2c_config.get('bus', 1), default=1)
+        self.i2c_addr = self._parse_i2c_value(self.i2c_config.get('addr', 0x48), default=0x48)
+        self.i2c_probe_reg = self._parse_i2c_value(self.i2c_config.get('probe_reg', 0x01), default=0x01)
+
+    @staticmethod
+    def _parse_i2c_value(value: Any, default: int) -> int:
+        """Parse I2C config values allowing hex strings like '0x48'."""
+        if value is None:
+            return default
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            try:
+                return int(value, 0)
+            except ValueError:
+                return default
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _check_i2c_connection(self) -> Dict[str, Any]:
+        """Probe ADS1115 I2C connectivity without ROS dependencies."""
+        result: Dict[str, Any] = {
+            'connected': None,
+            'bus': self.i2c_bus,
+            'addr': hex(self.i2c_addr),
+            'probe_reg': hex(self.i2c_probe_reg),
+        }
+
+        SMBus = None
+        try:
+            from smbus2 import SMBus as _SMBus
+            SMBus = _SMBus
+        except Exception:
+            try:
+                from smbus import SMBus as _SMBus
+                SMBus = _SMBus
+            except Exception:
+                SMBus = None
+
+        if SMBus is not None:
+            try:
+                bus = SMBus(self.i2c_bus)
+                try:
+                    # Read a register to confirm device presence
+                    _ = bus.read_word_data(self.i2c_addr, self.i2c_probe_reg)
+                finally:
+                    bus.close()
+                result['connected'] = True
+                return result
+            except Exception as e:
+                result['connected'] = False
+                result['error'] = str(e)
+                return result
+
+        # Fallback to i2cget if available
+        try:
+            import shutil
+            import subprocess
+
+            if shutil.which('i2cget'):
+                proc = subprocess.run(
+                    ['i2cget', '-y', str(self.i2c_bus), hex(self.i2c_addr), hex(self.i2c_probe_reg), 'w'],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+                if proc.returncode == 0:
+                    result['connected'] = True
+                    result['value'] = proc.stdout.strip()
+                else:
+                    result['connected'] = False
+                    result['error'] = proc.stderr.strip() or proc.stdout.strip()
+                return result
+        except Exception as e:
+            result['connected'] = False
+            result['error'] = str(e)
+            return result
+
+        result['error'] = 'smbus not available and i2cget not found'
+        return result
 
     def _get_ros2_monitor(self):
         """Lazy load ROS2 monitor for system status check"""
@@ -84,6 +169,44 @@ class BatteryDiagnostic(BaseDiagnostic):
         metrics = {}
         details = {}
 
+        # 0. I2C physical connectivity check (independent of ROS2)
+        i2c_status = self._check_i2c_connection()
+        i2c_connected = i2c_status.get('connected')
+        metrics['i2c'] = i2c_status
+        details['i2c'] = {k: v for k, v in i2c_status.items() if k != 'connected'}
+
+        if i2c_connected is False:
+            if self._was_connected:
+                current_time = time.time()
+                if current_time - self._last_alert_time.get('sensor_disconnected', 0) > self._alert_cooldown:
+                    self._record_alert(
+                        alert_type='sensor_disconnected',
+                        severity='critical',
+                        message='Battery I2C disconnected',
+                        metric_value=0,
+                        threshold=1,
+                        metadata={
+                            'bus': self.i2c_bus,
+                            'addr': hex(self.i2c_addr),
+                            'probe_reg': hex(self.i2c_probe_reg),
+                        }
+                    )
+                    self._last_alert_time['sensor_disconnected'] = current_time
+            self._was_connected = False
+            self.last_check = datetime.now()
+            self.check_count += 1
+            self.last_result = DiagnosticResult(
+                name=self.name,
+                status=StatusLevel.DISCONNECTED,
+                message=f"Battery I2C disconnected ({i2c_status.get('error', 'probe failed')})",
+                timestamp=self.last_check,
+                metrics=metrics,
+                details=details
+            )
+            return self.last_result
+        if i2c_connected is True and not self._was_connected:
+            self._was_connected = True
+
         # 1. Check if ROS2 system is running
         ros2_monitor = self._get_ros2_monitor()
         ros2_running = ros2_monitor.is_system_running()
@@ -92,10 +215,16 @@ class BatteryDiagnostic(BaseDiagnostic):
         if not ros2_running:
             self.last_check = datetime.now()
             self.check_count += 1
+            if i2c_connected is True:
+                status = StatusLevel.CONNECTED
+                message = "Battery connected (I2C), ROS2 not running"
+            else:
+                status = StatusLevel.STOPPED
+                message = "Battery - ROS2 not running (I2C status unknown)"
             self.last_result = DiagnosticResult(
                 name=self.name,
-                status=StatusLevel.STOPPED,
-                message="Battery - ROS2 not running",
+                status=status,
+                message=message,
                 timestamp=self.last_check,
                 metrics=metrics,
                 details=details
@@ -112,29 +241,31 @@ class BatteryDiagnostic(BaseDiagnostic):
 
         # 3. Determine overall status based on voltages
         if not topic_ok:
-            # Record disconnection alert when transitioning from connected to disconnected
-            if self._was_connected:
+            # If I2C is connected, treat as connected regardless of ROS topic data
+            if i2c_connected is True:
                 current_time = time.time()
-                if current_time - self._last_alert_time.get('sensor_disconnected', 0) > self._alert_cooldown:
+                if current_time - self._last_alert_time.get('sensor_no_data', 0) > self._alert_cooldown:
                     self._record_alert(
-                        alert_type='sensor_disconnected',
-                        severity='critical',
-                        message='Battery disconnected - no data available (battery_monitor node not running or I2C error)',
+                        alert_type='sensor_no_data',
+                        severity='warning',
+                        message='Battery I2C connected but no ROS data (battery_monitor node not running or topic missing)',
                         metric_value=0,
                         threshold=1,
                         metadata={
                             'topic': self.voltage_topic,
-                            'reason': 'data_not_available'
+                            'reason': 'data_not_available',
+                            'i2c_connected': True
                         }
                     )
-                    self._last_alert_time['sensor_disconnected'] = current_time
-                self._was_connected = False
-
-            overall_status = StatusLevel.DISCONNECTED
-            message = "Battery - no data available"
+                    self._last_alert_time['sensor_no_data'] = current_time
+                overall_status = StatusLevel.CONNECTED
+                message = "Battery connected (I2C) but no ROS data"
+            else:
+                overall_status = StatusLevel.DISCONNECTED
+                message = "Battery - no data available"
         else:
             # Update connection state when data is available
-            if not self._was_connected:
+            if i2c_connected is True and not self._was_connected:
                 self._was_connected = True
 
             # Check voltage levels
