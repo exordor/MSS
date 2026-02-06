@@ -17,6 +17,7 @@ let wsConnection = null;
 let connectionState = 'disconnected';
 let activeAlerts = {};
 let bannerAutoHideTimer = null;
+let initialDataPending = true;
 
 // Latest cached state from WebSocket
 let latestState = {
@@ -203,6 +204,7 @@ function handleFullState(data, timestamp) {
     if (typeof updateRosbagDisplay === 'function') updateRosbagDisplay(data.rosbag);
     if (typeof updateAlertsDisplay === 'function') updateAlertsDisplay(data.alerts);
 
+    markInitialDataUpdated();
     updateLastUpdated();
 }
 
@@ -237,6 +239,7 @@ function handleStateUpdate(data, timestamp) {
         checkForNewAlertsFromWS(data.alerts);
     }
 
+    markInitialDataUpdated();
     updateLastUpdated();
 }
 
@@ -396,6 +399,19 @@ function updateLastUpdated() {
         const now = new Date();
         el.textContent = now.toLocaleTimeString();
     }
+}
+
+function showInitialDataPending() {
+    initialDataPending = true;
+    const el = document.getElementById('lastUpdated');
+    if (el) el.textContent = 'Waiting for data update...';
+    showNotification('warning', 'Waiting for data update...');
+}
+
+function markInitialDataUpdated() {
+    if (!initialDataPending) return;
+    initialDataPending = false;
+    showNotification('success', 'Data updated');
 }
 
 function escapeHtml(text) {
@@ -669,6 +685,9 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('[Main] Current URL:', window.location.href);
     console.log('[Main] Host:', window.location.host);
     console.log('[Main] Protocol:', window.location.protocol);
+
+    // Show pending data message on page load/refresh
+    showInitialDataPending();
 
     // Initialize WebSocket connection
     console.log('[Main] Creating WSConnection instance...');

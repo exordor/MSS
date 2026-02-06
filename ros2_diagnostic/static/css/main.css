@@ -1286,6 +1286,14 @@ body {
     color: var(--danger);
 }
 
+.notification.warning {
+    border-left: 4px solid var(--warning);
+}
+
+.notification.warning i {
+    color: var(--warning);
+}
+
 /* ==========================================
    Log Viewer Page
    ========================================== */

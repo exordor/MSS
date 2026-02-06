@@ -268,7 +268,7 @@ class ConnectionManager:
         """Send complete system state to a newly connected client.
 
         Uses cached version to avoid blocking when multiple clients connect rapidly.
-        The cache is warmed by the background broadcaster every 5 seconds.
+        The cache is warmed by the background broadcaster and startup warm-up.
 
         Args:
             websocket: WebSocket 连接
@@ -284,18 +284,81 @@ class ConnectionManager:
                     # Default channels - send all data needed by dashboard
                     channels = {Channel.SENSORS, Channel.ALERTS, Channel.ROS2, Channel.ROS2_CONTROL, Channel.ROSBAG}
 
-        state = {}
-        # Use parallel async check for sensors (faster, doesn't block)
+        state: Dict[str, Any] = {}
+        missing: Set[Channel] = set()
+
+        # Fast path: use cached snapshots when available
         if Channel.SENSORS in channels:
-            state["sensors"] = await collect_sensor_status_parallel()
+            cached = _cache_get('sensors:status', max_age=CACHE_TTL.get('sensors', 2))
+            if cached is not None:
+                state["sensors"] = cached
+            else:
+                missing.add(Channel.SENSORS)
         if Channel.ROS2 in channels:
-            state["ros2"] = collect_ros2_status_cached()
+            cached = _cache_get('ros2:status', max_age=CACHE_TTL.get('ros2', 3))
+            if cached is not None:
+                state["ros2"] = cached
+            else:
+                missing.add(Channel.ROS2)
         if Channel.ROS2_CONTROL in channels:
-            state["ros2_control"] = collect_ros2_control_status()
+            cached = _cache_get('ros2_control:status', max_age=CACHE_TTL.get('ros2_control', 1))
+            if cached is not None:
+                state["ros2_control"] = cached
+            else:
+                missing.add(Channel.ROS2_CONTROL)
         if Channel.ROSBAG in channels:
-            state["rosbag"] = collect_rosbag_status()
+            cached = _cache_get('rosbag:status', max_age=CACHE_TTL.get('rosbag', 1))
+            if cached is not None:
+                state["rosbag"] = cached
+            else:
+                missing.add(Channel.ROSBAG)
         if Channel.ALERTS in channels:
-            state["alerts"] = collect_active_alerts()
+            cached = _cache_get('alerts:active', max_age=CACHE_TTL.get('alerts', 1))
+            if cached is not None:
+                state["alerts"] = cached
+            else:
+                missing.add(Channel.ALERTS)
+
+        # Slow path: collect missing channels in parallel
+        if missing:
+            tasks: Dict[str, Any] = {}
+            if Channel.SENSORS in missing:
+                tasks["sensors"] = collect_sensor_status_parallel()
+            if Channel.ROS2 in missing:
+                tasks["ros2"] = asyncio.to_thread(collect_ros2_status_cached)
+            if Channel.ROS2_CONTROL in missing:
+                tasks["ros2_control"] = asyncio.to_thread(collect_ros2_control_status)
+            if Channel.ROSBAG in missing:
+                tasks["rosbag"] = asyncio.to_thread(collect_rosbag_status)
+            if Channel.ALERTS in missing:
+                tasks["alerts"] = asyncio.to_thread(collect_active_alerts)
+
+            results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+            for key, result in zip(tasks.keys(), results):
+                if isinstance(result, Exception):
+                    logger.error(f"Error collecting {key} for full_state: {result}")
+                    # Ensure keys exist with safe fallbacks
+                    if key == "alerts":
+                        state[key] = []
+                    elif key == "ros2_control":
+                        state[key] = {"running": False}
+                    elif key == "rosbag":
+                        state[key] = {"recording": False}
+                    else:
+                        state[key] = {}
+                else:
+                    state[key] = result
+                    # Update cache with fresh data
+                    if key == "sensors":
+                        _cache_set('sensors:status', result)
+                    elif key == "ros2":
+                        _cache_set('ros2:status', result)
+                    elif key == "ros2_control":
+                        _cache_set('ros2_control:status', result)
+                    elif key == "rosbag":
+                        _cache_set('rosbag:status', result)
+                    elif key == "alerts":
+                        _cache_set('alerts:active', result)
 
         await websocket.send_json({
             "type": "full_state",
@@ -1379,13 +1442,24 @@ async def background_broadcaster():
 async def _collect_channel_data(channel: Channel) -> Dict[str, Any]:
     """Collect channel data without blocking the event loop."""
     if channel == Channel.SENSORS:
-        return await collect_sensor_status_parallel()
+        data = await collect_sensor_status_parallel()
+        return data
     if channel == Channel.ROS2:
-        return await asyncio.to_thread(collect_ros2_status_cached)
+        data = await asyncio.to_thread(collect_ros2_status_cached)
+        _cache_set('ros2:status', data)
+        return data
     if channel == Channel.ROS2_CONTROL:
-        return await asyncio.to_thread(collect_ros2_control_status)
+        data = await asyncio.to_thread(collect_ros2_control_status)
+        _cache_set('ros2_control:status', data)
+        return data
     if channel == Channel.ROSBAG:
-        return await asyncio.to_thread(collect_rosbag_status)
+        data = await asyncio.to_thread(collect_rosbag_status)
+        _cache_set('rosbag:status', data)
+        return data
+    if channel == Channel.ALERTS:
+        data = await asyncio.to_thread(collect_active_alerts)
+        _cache_set('alerts:active', data)
+        return data
     return {}
 
 
@@ -1508,9 +1582,34 @@ async def warm_cache_on_startup():
     try:
         # Warm ROS2 status cache
         ros2_data = collect_ros2_status()
+        _cache_set('ros2:status', ros2_data)
         logger.info(f"[CACHE] ROS2 cache warmed in {time.time() - start_time:.2f}s")
     except Exception as e:
         logger.warning(f"[CACHE] ROS2 cache warm-up failed: {e}")
+
+    try:
+        # Warm ROS2 control status cache
+        ros2_control_data = await asyncio.to_thread(collect_ros2_control_status)
+        _cache_set('ros2_control:status', ros2_control_data)
+        logger.info(f"[CACHE] ROS2 control cache warmed in {time.time() - start_time:.2f}s")
+    except Exception as e:
+        logger.warning(f"[CACHE] ROS2 control cache warm-up failed: {e}")
+
+    try:
+        # Warm rosbag status cache
+        rosbag_data = await asyncio.to_thread(collect_rosbag_status)
+        _cache_set('rosbag:status', rosbag_data)
+        logger.info(f"[CACHE] Rosbag cache warmed in {time.time() - start_time:.2f}s")
+    except Exception as e:
+        logger.warning(f"[CACHE] Rosbag cache warm-up failed: {e}")
+
+    try:
+        # Warm alerts cache
+        alerts_data = await asyncio.to_thread(collect_active_alerts)
+        _cache_set('alerts:active', alerts_data)
+        logger.info(f"[CACHE] Alerts cache warmed in {time.time() - start_time:.2f}s")
+    except Exception as e:
+        logger.warning(f"[CACHE] Alerts cache warm-up failed: {e}")
 
     logger.info(f"[CACHE] Warm-up completed in {time.time() - start_time:.2f}s")
 
