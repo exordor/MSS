@@ -122,9 +122,11 @@ function updateSensorsDisplay(sensorsData) {
 
     if (!tableBody) return;
 
-    // Update cache (merge for partial updates)
+    // Update cache (merge for partial updates, per-sensor)
     if (partial) {
-        sensorsCache = { ...sensorsCache, ...sensors };
+        Object.entries(sensors).forEach(([name, patch]) => {
+            sensorsCache[name] = { ...(sensorsCache[name] || {}), ...(patch || {}) };
+        });
     } else {
         sensorsCache = sensors;
     }

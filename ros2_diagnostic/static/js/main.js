@@ -276,15 +276,11 @@ function handleSensorsUpdate(data, timestamp) {
     // Handle sensors channel update
     console.log('[WS] Received sensors update');
     if (data && data.sensors) {
-        if (data.partial && latestState.sensors && latestState.sensors.sensors) {
-            latestState.sensors.sensors = {
-                ...latestState.sensors.sensors,
-                ...data.sensors
-            };
-        } else if (data.partial && (!latestState.sensors || !latestState.sensors.sensors)) {
-            latestState.sensors = {
-                sensors: { ...data.sensors }
-            };
+        if (data.partial) {
+            if (!latestState.sensors || !latestState.sensors.sensors) {
+                latestState.sensors = { sensors: {} };
+            }
+            latestState.sensors.sensors = mergeSensorUpdates(latestState.sensors.sensors, data.sensors);
         } else {
             latestState.sensors = data;
         }
@@ -312,6 +308,23 @@ function handleRos2ControlUpdate(data, timestamp) {
     if (data) latestState.ros2_control = data;
     if (typeof updateROS2ControlStatus === 'function') {
         updateROS2ControlStatusFromWS(data);
+    }
+    updateLastUpdated();
+}
+
+function handleConnectivityUpdate(data, timestamp) {
+    console.log('[WS] Received connectivity update');
+    if (data && data.sensors) {
+        if (!latestState.sensors || !latestState.sensors.sensors) {
+            latestState.sensors = { sensors: {} };
+        }
+        latestState.sensors.sensors = mergeSensorUpdates(latestState.sensors.sensors, data.sensors);
+    }
+    if (typeof updateSensorsDisplay === 'function') {
+        updateSensorsDisplay({ sensors: data.sensors, partial: true });
+    }
+    if (hasSensorUI()) {
+        markInitialDataUpdated();
     }
     updateLastUpdated();
 }
@@ -421,6 +434,14 @@ function updateLastUpdated() {
         const now = new Date();
         el.textContent = now.toLocaleTimeString();
     }
+}
+
+function mergeSensorUpdates(current, updates) {
+    const merged = { ...(current || {}) };
+    Object.entries(updates || {}).forEach(([name, patch]) => {
+        merged[name] = { ...(merged[name] || {}), ...(patch || {}) };
+    });
+    return merged;
 }
 
 function hasSensorUI() {
@@ -737,6 +758,7 @@ document.addEventListener('DOMContentLoaded', function() {
     wsConnection.on('alert', handleAlert);  // Real-time alert push
     // Channel-based handlers
     wsConnection.on('sensors_update', handleSensorsUpdate);
+    wsConnection.on('connectivity_update', handleConnectivityUpdate);
     wsConnection.on('ros2_update', handleRos2Update);
     wsConnection.on('ros2_control_update', handleRos2ControlUpdate);
     wsConnection.on('rosbag_update', handleRosbagUpdate);

@@ -57,7 +57,9 @@ function updateSensorsDisplay(sensorsData) {
     const sensors = sensorsData.sensors || {};
 
     if (partial) {
-        sensorsCache = { ...sensorsCache, ...sensors };
+        Object.entries(sensors).forEach(([name, patch]) => {
+            sensorsCache[name] = { ...(sensorsCache[name] || {}), ...(patch || {}) };
+        });
     } else {
         sensorsCache = sensors;
     }

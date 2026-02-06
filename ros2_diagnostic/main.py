@@ -136,6 +136,7 @@ def calculate_state_diff(prev: dict, curr: dict) -> dict:
 class Channel(Enum):
     """WebSocket 数据频道"""
     SENSORS = "sensors"       # 传感器状态 (1秒)
+    CONNECTIVITY = "connectivity"  # 连接性快速更新
     ALERTS = "alerts"         # 告警 (实时)
     ROS2 = "ros2"            # ROS2 系统 (10秒)
     ROS2_CONTROL = "ros2_control"  # ROS2 控制 (5秒)
@@ -173,7 +174,7 @@ class ConnectionManager:
         with self._lock:
             self.connections[websocket] = ConnectionInfo(
                 websocket=websocket,
-                channels=set(channels or [Channel.SENSORS, Channel.ALERTS, Channel.ROS2, Channel.ROS2_CONTROL, Channel.ROSBAG]),
+                channels=set(channels or [Channel.SENSORS, Channel.CONNECTIVITY, Channel.ALERTS, Channel.ROS2, Channel.ROS2_CONTROL, Channel.ROSBAG]),
                 connected_at=time.time()
             )
 
@@ -282,7 +283,7 @@ class ConnectionManager:
                     channels = info.channels
                 else:
                     # Default channels - send all data needed by dashboard
-                    channels = {Channel.SENSORS, Channel.ALERTS, Channel.ROS2, Channel.ROS2_CONTROL, Channel.ROSBAG}
+                    channels = {Channel.SENSORS, Channel.CONNECTIVITY, Channel.ALERTS, Channel.ROS2, Channel.ROS2_CONTROL, Channel.ROSBAG}
 
         state: Dict[str, Any] = {}
         missing: Set[Channel] = set()
@@ -982,6 +983,70 @@ async def _broadcast_sensors_incremental() -> Dict[str, Any]:
     return result
 
 
+def _format_connectivity(sensor_name: str, connected_value: Optional[bool]) -> Dict[str, Any]:
+    """Format connectivity-only payload for a sensor."""
+    if connected_value is True:
+        return {
+            'connected': 'Connected',
+        }
+    if connected_value is False:
+        return {
+            'connected': 'Disconnected',
+            'status': 'disconnected',
+            'color': 'red',
+            'message': 'Sensor disconnected'
+        }
+    return {
+        'connected': '--',
+    }
+
+
+def _collect_connectivity_sync(sensor_name: str) -> Dict[str, Any]:
+    """Collect connectivity-only status for a sensor (no ROS data checks)."""
+    monitor = get_monitor(sensor_name)
+    connected_value: Optional[bool] = None
+
+    try:
+        if sensor_name in ['navi_lidar', 'uli_lidar', 'camera', 'thruster']:
+            result = monitor._check_connectivity()
+            connected_value = result.get('reachable', False)
+        elif sensor_name == 'imu':
+            result = monitor._check_serial_connection()
+            connected_value = result.get('connected', False)
+        elif sensor_name == 'battery':
+            result = monitor._check_i2c_connection()
+            connected_value = result.get('connected', None)
+    except Exception as e:
+        logger.debug(f"[connectivity] {sensor_name} check failed: {e}")
+        connected_value = None
+
+    return _format_connectivity(sensor_name, connected_value)
+
+
+async def _broadcast_connectivity_incremental() -> None:
+    """Broadcast connectivity updates incrementally."""
+    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery']
+
+    async def _run(name: str):
+        return name, await asyncio.to_thread(_collect_connectivity_sync, name)
+
+    tasks = [asyncio.create_task(_run(name)) for name in sensor_names]
+
+    for task in asyncio.as_completed(tasks):
+        name, payload = await task
+        await manager.broadcast_to_channel(
+            Channel.CONNECTIVITY,
+            {
+                "type": "connectivity_update",
+                "data": {
+                    "sensors": {name: payload},
+                    "partial": True
+                },
+                "timestamp": time.time()
+            }
+        )
+
+
 def collect_ros2_status_cached() -> Dict[str, Any]:
     """Collect ROS2 status with caching (TTL from config)."""
     cache_key = 'ros2:status'
@@ -1470,6 +1535,11 @@ CHANNEL_CONFIG = {
         "priority": "high",   # 高优先级
         "cache_ttl": 0.5,     # 使用 0.5 秒缓存 (最小化延迟)
     },
+    Channel.CONNECTIVITY: {
+        "interval": 0.5,      # 连接性快速更新
+        "priority": "high",
+        "cache_ttl": 0,
+    },
     Channel.ALERTS: {
         "interval": 0,        # 实时推送（由回调触发）
         "priority": "critical",
@@ -1574,6 +1644,8 @@ async def _channel_broadcaster_loop(channel: Channel, interval: float) -> None:
             async with in_flight:
                 if channel == Channel.SENSORS:
                     await _broadcast_sensors_incremental()
+                elif channel == Channel.CONNECTIVITY:
+                    await _broadcast_connectivity_incremental()
                 else:
                     collect_start = time.monotonic()
                     data = await _collect_channel_data(channel)
