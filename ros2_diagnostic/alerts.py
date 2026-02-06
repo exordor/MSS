@@ -259,6 +259,19 @@ class AlertStore:
         self._conn.commit()
         return cursor.rowcount > 0
 
+    def resolve_all(self) -> int:
+        """Resolve all active alerts.
+
+        Returns:
+            Number of alerts updated
+        """
+        cursor = self._conn.execute('''
+            UPDATE alerts SET status = 'resolved', resolved_at = ?
+            WHERE status = 'active'
+        ''', (datetime.now().isoformat(),))
+        self._conn.commit()
+        return cursor.rowcount
+
     def ignore_alert(self, alert_id: int) -> bool:
         """忽略告警（不再显示，但保留记录）
 
@@ -274,6 +287,19 @@ class AlertStore:
         ''', (alert_id,))
         self._conn.commit()
         return cursor.rowcount > 0
+
+    def ignore_all(self) -> int:
+        """Ignore all active alerts.
+
+        Returns:
+            Number of alerts updated
+        """
+        cursor = self._conn.execute('''
+            UPDATE alerts SET status = 'ignored'
+            WHERE status = 'active'
+        ''')
+        self._conn.commit()
+        return cursor.rowcount
 
     def get_alert_stats(self) -> Dict[str, Any]:
         """获取告警统计

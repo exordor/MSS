@@ -243,21 +243,6 @@ class BatteryDiagnostic(BaseDiagnostic):
         if not topic_ok:
             # If I2C is connected, treat as connected regardless of ROS topic data
             if i2c_connected is True:
-                current_time = time.time()
-                if current_time - self._last_alert_time.get('sensor_no_data', 0) > self._alert_cooldown:
-                    self._record_alert(
-                        alert_type='sensor_no_data',
-                        severity='warning',
-                        message='Battery I2C connected but no ROS data (battery_monitor node not running or topic missing)',
-                        metric_value=0,
-                        threshold=1,
-                        metadata={
-                            'topic': self.voltage_topic,
-                            'reason': 'data_not_available',
-                            'i2c_connected': True
-                        }
-                    )
-                    self._last_alert_time['sensor_no_data'] = current_time
                 overall_status = StatusLevel.CONNECTED
                 message = "Battery connected (I2C) but no ROS data"
             else:

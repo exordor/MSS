@@ -2384,6 +2384,38 @@ async def resolve_alert(alert_id: int) -> JSONResponse:
         return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
 
+@app.post("/api/alerts/resolve_all")
+async def resolve_all_alerts() -> JSONResponse:
+    """Resolve all active alerts"""
+    event_store = get_event_store() if EVENT_LOG_CONFIG.get("enabled", True) else None
+    try:
+        store = get_alert_store()
+        count = store.resolve_all()
+        active_alerts = [alert.__dict__ for alert in store.get_active_alerts(None)]
+        _cache_set('alerts:active', active_alerts)
+
+        if event_store:
+            event_store.log_event(EventLog(
+                event_type='alert_resolved',
+                action='resolve_all',
+                resource='alerts',
+                message=f'Resolved {count} alerts',
+                metadata=json.dumps({'count': count}),
+                created_at=datetime.now().isoformat(),
+                success=True
+            ))
+
+        return JSONResponse(content={
+            "success": True,
+            "message": f"Resolved {count} alert(s)",
+            "count": count,
+            "active": active_alerts
+        })
+    except Exception as e:
+        logger.error(f"Error resolving all alerts: {e}")
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
 @app.post("/api/alerts/{alert_id}/ignore")
 async def ignore_alert(alert_id: int) -> JSONResponse:
     """Mark an alert as ignored"""
@@ -2410,6 +2442,38 @@ async def ignore_alert(alert_id: int) -> JSONResponse:
         })
     except Exception as e:
         logger.error(f"Error ignoring alert {alert_id}: {e}")
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/alerts/ignore_all")
+async def ignore_all_alerts() -> JSONResponse:
+    """Ignore all active alerts"""
+    event_store = get_event_store() if EVENT_LOG_CONFIG.get("enabled", True) else None
+    try:
+        store = get_alert_store()
+        count = store.ignore_all()
+        active_alerts = [alert.__dict__ for alert in store.get_active_alerts(None)]
+        _cache_set('alerts:active', active_alerts)
+
+        if event_store:
+            event_store.log_event(EventLog(
+                event_type='alert_ignored',
+                action='ignore_all',
+                resource='alerts',
+                message=f'Ignored {count} alerts',
+                metadata=json.dumps({'count': count}),
+                created_at=datetime.now().isoformat(),
+                success=True
+            ))
+
+        return JSONResponse(content={
+            "success": True,
+            "message": f"Ignored {count} alert(s)",
+            "count": count,
+            "active": active_alerts
+        })
+    except Exception as e:
+        logger.error(f"Error ignoring all alerts: {e}")
         return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
 

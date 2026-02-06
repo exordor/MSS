@@ -555,7 +555,15 @@ const API = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         }).then(r => r.json()),
+        resolveAll: () => fetch('/api/alerts/resolve_all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        }).then(r => r.json()),
         ignore: (id) => fetch(`/api/alerts/${id}/ignore`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        }).then(r => r.json()),
+        ignoreAll: () => fetch('/api/alerts/ignore_all', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         }).then(r => r.json()),

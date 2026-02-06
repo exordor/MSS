@@ -56,6 +56,104 @@ const AlertManager = {
     },
 
     /**
+     * Resolve all active alerts
+     */
+    async resolveAllAlerts() {
+        if (this.alerts.length === 0) {
+            showNotification('warning', 'No active alerts');
+            return false;
+        }
+        if (!confirm('Resolve all active alerts?')) return false;
+
+        try {
+            const result = await API.alerts.resolveAll();
+            if (result.success) {
+                this.alerts = result.active || [];
+                this.activeCount = this.alerts.length;
+                this.render();
+                this.fetchStats();
+                showNotification('success', result.message || 'All alerts resolved');
+                return true;
+            }
+            showNotification('error', result.message || 'Failed to resolve alerts');
+        } catch (error) {
+            console.error('Error resolving all alerts:', error);
+            // Fallback: resolve one-by-one if bulk API is unavailable
+            const ok = await this._bulkActionFallback('resolve', 'Resolved');
+            if (ok) return true;
+            showNotification('error', 'Error resolving alerts');
+        }
+        return false;
+    },
+
+    /**
+     * Ignore all active alerts
+     */
+    async ignoreAllAlerts() {
+        if (this.alerts.length === 0) {
+            showNotification('warning', 'No active alerts');
+            return false;
+        }
+        if (!confirm('Ignore all active alerts?')) return false;
+
+        try {
+            const result = await API.alerts.ignoreAll();
+            if (result.success) {
+                this.alerts = result.active || [];
+                this.activeCount = this.alerts.length;
+                this.render();
+                this.fetchStats();
+                showNotification('success', result.message || 'All alerts ignored');
+                return true;
+            }
+            showNotification('error', result.message || 'Failed to ignore alerts');
+        } catch (error) {
+            console.error('Error ignoring all alerts:', error);
+            // Fallback: ignore one-by-one if bulk API is unavailable
+            const ok = await this._bulkActionFallback('ignore', 'Ignored');
+            if (ok) return true;
+            showNotification('error', 'Error ignoring alerts');
+        }
+        return false;
+    },
+
+    /**
+     * Fallback bulk handler using per-alert APIs.
+     * @param {'resolve'|'ignore'} action
+     * @param {string} verb
+     * @returns {boolean}
+     */
+    async _bulkActionFallback(action, verb) {
+        const ids = this.alerts.map(a => a.id);
+        if (ids.length === 0) return false;
+
+        const succeeded = new Set();
+        for (const id of ids) {
+            try {
+                const result = action === 'resolve'
+                    ? await API.alerts.resolve(id)
+                    : await API.alerts.ignore(id);
+                if (result && result.success) {
+                    succeeded.add(id);
+                }
+            } catch (e) {
+                console.error(`Bulk ${action} failed for alert ${id}:`, e);
+            }
+        }
+
+        if (succeeded.size > 0) {
+            this.alerts = this.alerts.filter(a => !succeeded.has(a.id));
+            this.activeCount = this.alerts.length;
+            this.render();
+            this.fetchStats();
+            showNotification('success', `${verb} ${succeeded.size} alert(s)`);
+            return true;
+        }
+
+        return false;
+    },
+
+    /**
      * Render alerts to the DOM
      */
     render() {
@@ -301,6 +399,14 @@ async function resolveAlert(alertId) {
 
 async function ignoreAlert(alertId) {
     await AlertManager.ignoreAlert(alertId);
+}
+
+async function resolveAllAlerts() {
+    await AlertManager.resolveAllAlerts();
+}
+
+async function ignoreAllAlerts() {
+    await AlertManager.ignoreAllAlerts();
 }
 
 /**

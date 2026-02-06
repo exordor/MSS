@@ -131,6 +131,12 @@
                     <i class="fa-solid fa-bell card-icon"></i>
                     <span class="card-title">Active Alerts</span>
                     <span class="alert-count" id="alertCount">0</span>
+                    <button class="btn-icon-sm" id="resolveAllAlertsBtn" onclick="resolveAllAlerts()" title="Resolve all">
+                        <i class="fa-solid fa-check-double"></i>
+                    </button>
+                    <button class="btn-icon-sm" id="ignoreAllAlertsBtn" onclick="ignoreAllAlerts()" title="Ignore all">
+                        <i class="fa-solid fa-ban"></i>
+                    </button>
                     <button class="btn-icon-sm" id="refreshAlertsBtn" onclick="refreshAlerts()" title="Refresh">
                         <i class="fa-solid fa-rotate"></i>
                     </button>
