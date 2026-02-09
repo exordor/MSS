@@ -67,6 +67,11 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
   if { [ "$leap" = "Normal" ] || [ "$leap" = "Insert second" ] || [ "$leap" = "Delete second" ]; } \
      && [ -n "$refid" ] && [ "${refid%% *}" != "00000000" ] \
      && [ -n "$stratum" ] && [ "$stratum" -gt 0 ] 2>/dev/null; then
+    log "Chrony tracking: refid=${refid} stratum=${stratum} leap=${leap}"
+    src_best="$(chronyc sources -v 2>/dev/null | awk '/\\*/ {print $2, $3, $4, $5, $6, $7, $8, $9, $10; exit}')"
+    if [ -n "$src_best" ]; then
+      log "Chrony best source: ${src_best}"
+    fi
     synced=true
     break
   fi
