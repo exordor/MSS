@@ -67,11 +67,17 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo -e "${YELLOW}Note: Results are for reference only. Check ptp4l and phc2sys logs for actual sync status.${NC}"
 echo ""
 
+# Get time properties (UTC offset, timescale)
+TIME_PROP=$(pmc -u -b 0 'GET TIME_PROPERTIES_DATA_SET' 2>/dev/null)
+UTC_OFFSET=$(echo "$TIME_PROP" | awk '/currentUtcOffset[[:space:]]/{print $2}')
+UTC_OFFSET_VALID=$(echo "$TIME_PROP" | awk '/currentUtcOffsetValid[[:space:]]/{print $2}')
+PTP_TIMESCALE=$(echo "$TIME_PROP" | awk '/ptpTimescale[[:space:]]/{print $2}')
+
 # Get PHC time (raw TAI time, no conversion)
 PHC_DEVICE="/dev/ptp0"
 PHC_TIME=$(phc_ctl $PHC_DEVICE get 2>/dev/null | sed -n 's/.*clock time is \([0-9]\+\(\.[0-9]\+\)\?\).*/\1/p')
 
-# Get System time once (already in UTC)
+# Get System time once (CLOCK_REALTIME - timescale depends on sync strategy)
 SYS_SEC=$(date +%s)
 SYS_NSEC=$(date +%N)
 SYS_TIME=$(date -d "@$SYS_SEC" +"%Y-%m-%d %H:%M:%S").$SYS_NSEC
@@ -92,15 +98,49 @@ if [ "$PHC_TIME" != "N/A" ]; then
     else
         echo -e "${RED}PHC Time (${PHC_DEVICE}):        Invalid value ($PHC_TIME)${NC}"
     fi
-    echo -e "                        ${YELLOW}(PHC uses TAI, system uses UTC; difference ~37 seconds expected)${NC}"
+    if [ "$PTP_TIMESCALE" = "1" ] && [ "$UTC_OFFSET_VALID" = "1" ] && [ -n "$UTC_OFFSET" ]; then
+        PHC_UTC_SEC=$((PHC_SEC - UTC_OFFSET))
+        if PHC_UTC_DATE=$(date -d "@$PHC_UTC_SEC" +"%Y-%m-%d %H:%M:%S" 2>/dev/null); then
+            echo "PHC Time (UTC):          $PHC_UTC_DATE.$PHC_NSEC (TAI-$UTC_OFFSET)"
+        fi
+        echo -e "                        ${YELLOW}(PTP timescale=TAI, UTC offset=${UTC_OFFSET}s; diff ≈ ${UTC_OFFSET}s if system is UTC)${NC}"
+    else
+        echo -e "                        ${YELLOW}(PTP timescale/UTC offset not available)${NC}"
+    fi
 else
     echo -e "${RED}PHC Time (${PHC_DEVICE}):        Cannot read${NC}"
 fi
 
-echo "System Time:            $SYS_TIME (UTC)"
+echo "System Time:            $SYS_TIME (CLOCK_REALTIME)"
 
 # Display raw timestamps for comparison
 if [ "$PHC_TIME" != "N/A" ]; then
+    # Compute PHC - System difference
+    PHC_NSEC_INT=$((10#$PHC_NSEC))
+    SYS_NSEC_INT=$((10#$SYS_NSEC))
+    DIFF_NS=$(((PHC_SEC - SYS_SEC) * 1000000000 + (PHC_NSEC_INT - SYS_NSEC_INT)))
+    if [ $DIFF_NS -lt 0 ]; then
+        DIFF_ABS=$(( -DIFF_NS ))
+    else
+        DIFF_ABS=$DIFF_NS
+    fi
+    DIFF_SEC=$(awk "BEGIN{printf \"%.6f\", $DIFF_NS/1000000000}")
+    echo ""
+    echo "PHC - System:           ${DIFF_SEC} s"
+
+    if [ "$PTP_TIMESCALE" = "1" ] && [ "$UTC_OFFSET_VALID" = "1" ] && [ -n "$UTC_OFFSET" ]; then
+        OFFSET_NS=$((UTC_OFFSET * 1000000000))
+        OFFSET_NS_MIN=$((OFFSET_NS - 1000000000))
+        OFFSET_NS_MAX=$((OFFSET_NS + 1000000000))
+        if [ $DIFF_ABS -le 1000000000 ]; then
+            echo -e "Inference:              ${GREEN}System time appears TAI (PHC≈System)${NC}"
+        elif [ $DIFF_ABS -ge $OFFSET_NS_MIN ] && [ $DIFF_ABS -le $OFFSET_NS_MAX ]; then
+            echo -e "Inference:              ${GREEN}System time appears UTC (PHC≈UTC+${UTC_OFFSET}s)${NC}"
+        else
+            echo -e "Inference:              ${YELLOW}System time scale unclear (diff not ~0s or ~${UTC_OFFSET}s)${NC}"
+        fi
+    fi
+
     echo ""
     echo "Raw Timestamps:"
     echo "  PHC (TAI):             $PHC_TIME"
