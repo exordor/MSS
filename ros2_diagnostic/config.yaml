@@ -243,9 +243,18 @@ charts:
 ui:
   refresh_interval: 2000           # Dashboard refresh interval (milliseconds)
   chart_update_interval: 1000      # Chart data update interval (milliseconds)
+  time_refresh_interval: 1000      # System/PHC time refresh interval (milliseconds)
   max_log_lines: 100               # Maximum log lines to display
   ping_timeout: 1                  # Ping timeout for connectivity tests (seconds) (reduced from 2)
   ping_count: 2                    # Number of ping packets per test (reduced from 4)
+
+# ------------------------------------------------------------------------------
+# Time Synchronization / PHC Configuration
+# ------------------------------------------------------------------------------
+time:
+  phc_device: "/dev/ptp0"          # PHC device for PTP hardware clock
+  phc_timeout: 1.0                 # PHC read timeout (seconds)
+  phc_ctl_path: ""                 # Optional absolute path to phc_ctl (empty = auto)
 
 # ------------------------------------------------------------------------------
 # External Tools Configuration

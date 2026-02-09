@@ -11,6 +11,8 @@ import logging
 import time
 import asyncio
 import io
+import re
+import shutil
 from datetime import datetime
 from threading import Thread, Lock
 from typing import List, Dict, Any, Optional, Set
@@ -32,7 +34,7 @@ from config import (
     ROS2_CONFIG, ROS2_CONTROL, ROSBAG_CONFIG, SENSOR_IPS, SENSOR_THRESHOLDS,
     EXPECTED_NODES, IGNORED_NODES, SENSOR_NODES, ROS2_TOPICS,
     ENABLE_TOPIC_DETAILS, CACHE_TTL, LOG_FILES, LOG_ROOT, UI_CONFIG, PROJECT_ROOT,
-    TOOLS_CONFIG_FILES, EVENT_LOG_CONFIG, SENSOR_I2C
+    TOOLS_CONFIG_FILES, EVENT_LOG_CONFIG, SENSOR_I2C, TIME_CONFIG
 )
 from diagnostics import ROS2Monitor, ROS2Controller
 from diagnostics.rosbag_controller import get_rosbag_controller
@@ -520,6 +522,122 @@ def invalidate_cache_pattern(pattern: str) -> int:
         if count > 0:
             logger.debug(f"[CACHE] Cleared {count} entries matching '{pattern}'")
         return count
+
+
+def _format_time_display(epoch_seconds: float) -> Dict[str, Any]:
+    """Format epoch seconds into local time strings for UI display."""
+    local_tz = datetime.now().astimezone().tzinfo
+    dt = datetime.fromtimestamp(epoch_seconds, tz=local_tz)
+    return {
+        "epoch": epoch_seconds,
+        "iso": dt.isoformat(),
+        "display": dt.strftime("%Y-%m-%d %H:%M:%S %Z"),
+        "timezone": dt.tzname(),
+    }
+
+
+def _parse_phc_time(output: str) -> Optional[float]:
+    """Parse phc_ctl output and return epoch seconds (float), or None."""
+    if not output:
+        return None
+    # Common output: "phc_ctl[...]: clock time is 1700000000.123456789"
+    match = re.search(r"clock time(?: is)?\s*([0-9]+)(?:\.([0-9]+))?", output)
+    if not match:
+        # Fallback: "time is <seconds>"
+        match = re.search(r"time(?: is)?\s*([0-9]+)(?:\.([0-9]+))?", output)
+    if not match:
+        return None
+    seconds = int(match.group(1))
+    frac = match.group(2) or "0"
+    # Normalize fractional seconds to nanoseconds precision (9 digits)
+    nsec = int((frac + "000000000")[:9])
+    return seconds + (nsec / 1e9)
+
+
+def collect_time_status() -> Dict[str, Any]:
+    """Collect system time and PHC time for dashboard display."""
+    system_epoch = time.time()
+    system_info = _format_time_display(system_epoch)
+
+    phc_device = TIME_CONFIG.get("phc_device", "/dev/ptp0")
+    phc_timeout = float(TIME_CONFIG.get("phc_timeout", 1.0))
+    phc_ctl_path = TIME_CONFIG.get("phc_ctl_path") or ""
+
+    phc_info: Dict[str, Any] = {
+        "available": False,
+        "device": phc_device,
+    }
+
+    if not phc_device or not os.path.exists(phc_device):
+        phc_info["error"] = "device_not_found"
+    else:
+        if phc_ctl_path:
+            phc_ctl = phc_ctl_path if os.path.exists(phc_ctl_path) else None
+        else:
+            phc_ctl = shutil.which("phc_ctl")
+            if not phc_ctl:
+                for candidate in ("/usr/sbin/phc_ctl", "/sbin/phc_ctl"):
+                    if os.path.exists(candidate):
+                        phc_ctl = candidate
+                        break
+
+        if not phc_ctl:
+            phc_info["error"] = "phc_ctl_missing"
+            return {
+                "system": system_info,
+                "phc": phc_info,
+            }
+
+        try:
+            import subprocess
+            proc = subprocess.run(
+                [phc_ctl, phc_device, "get"],
+                capture_output=True,
+                text=True,
+                timeout=phc_timeout
+            )
+            output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+            if proc.returncode == 0:
+                phc_epoch = _parse_phc_time(output)
+                if phc_epoch is not None:
+                    phc_info.update(_format_time_display(phc_epoch))
+                    phc_info["available"] = True
+                else:
+                    phc_info["error"] = "parse_failed"
+                    if output:
+                        phc_info["output"] = output[:200]
+            else:
+                if "permission denied" in output.lower():
+                    phc_info["error"] = "permission_denied"
+                else:
+                    phc_info["error"] = "command_failed"
+                if output:
+                    phc_info["output"] = output[:200]
+        except subprocess.TimeoutExpired:
+            phc_info["error"] = "timeout"
+        except Exception as exc:
+            phc_info["error"] = str(exc)
+
+    result: Dict[str, Any] = {
+        "system": system_info,
+        "phc": phc_info,
+    }
+
+    if phc_info.get("available") and phc_info.get("epoch") is not None:
+        result["offset_sec"] = round(system_epoch - float(phc_info["epoch"]), 6)
+
+    return result
+
+
+def collect_time_status_cached(max_age: float = 1.0) -> Dict[str, Any]:
+    """Collect time status with caching to limit command execution frequency."""
+    cache_key = "time:status"
+    cached = _cache_get(cache_key, max_age=max_age)
+    if cached is not None:
+        return cached
+    result = collect_time_status()
+    _cache_set(cache_key, result)
+    return result
 
 
 def _resolve_log_path(category: str, session_id: str, filename: str):
@@ -1905,7 +2023,8 @@ async def index(request: Request):
             "request": request,
             "page": "dashboard",
             "wireless_ip": wireless_ip,
-            "refresh_interval": UI_CONFIG['refresh_interval']
+            "refresh_interval": UI_CONFIG['refresh_interval'],
+            "time_refresh_interval": UI_CONFIG.get("time_refresh_interval", 1000),
         }
     )
 
@@ -2893,6 +3012,19 @@ async def invalidate_cache(pattern: str = "") -> JSONResponse:
             "success": False,
             "error": str(e)
         }, status_code=500)
+
+
+@app.get("/api/time/status")
+async def get_time_status() -> JSONResponse:
+    """Get current system time and PHC time."""
+    try:
+        refresh_ms = UI_CONFIG.get("time_refresh_interval", 1000)
+        max_age = max(0.2, float(refresh_ms) / 1000.0)
+        data = await asyncio.to_thread(collect_time_status_cached, max_age)
+        return JSONResponse(content={"success": True, "data": data})
+    except Exception as e:
+        logger.error(f"Error getting time status: {e}")
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
 
 @app.get("/api/sensors/status")

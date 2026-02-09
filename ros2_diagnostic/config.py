@@ -109,6 +109,14 @@ TOOLS_CONFIG_FILES = {
     key: _resolve(value) for key, value in cfg.get("tools", {}).get("config_files", {}).items()
 }
 
+# Time synchronization / PHC configuration
+time_cfg = cfg.get("time", {})
+TIME_CONFIG = {
+    "phc_device": _resolve(time_cfg.get("phc_device", "/dev/ptp0")),
+    "phc_timeout": float(time_cfg.get("phc_timeout", 1.0)),
+    "phc_ctl_path": _resolve(time_cfg.get("phc_ctl_path", "")),
+}
+
 
 # Event log configuration
 event_cfg = cfg.get("event_log", {})

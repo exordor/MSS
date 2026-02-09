@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initRosbagControls();
     initSensorsTable();
     initROS2Controls();
+    initTimeStatus();
 });
 
 function initSensorsTable() {
@@ -57,6 +58,70 @@ function initSensorsTable() {
         `;
     }
     tableBody.innerHTML = html;
+}
+
+// ==========================================
+// Time Status (System + PHC)
+// ==========================================
+
+let timeStatusTimer = null;
+
+function initTimeStatus() {
+    const systemEl = document.getElementById('systemTimeValue');
+    if (!systemEl) return;
+
+    const refreshBtn = document.getElementById('timeRefreshBtn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => refreshTimeStatus(true));
+    }
+
+    refreshTimeStatus(false);
+
+    const interval = (typeof TIME_REFRESH_INTERVAL !== 'undefined' ? TIME_REFRESH_INTERVAL : 1000);
+    if (timeStatusTimer) clearInterval(timeStatusTimer);
+    timeStatusTimer = setInterval(() => refreshTimeStatus(false), Math.max(500, interval));
+}
+
+async function refreshTimeStatus(manual = false) {
+    const refreshBtn = document.getElementById('timeRefreshBtn');
+    const originalIcon = refreshBtn?.querySelector('i')?.className;
+
+    if (manual && refreshBtn) {
+        refreshBtn.querySelector('i').className = 'fa-solid fa-rotate fa-spin';
+    }
+
+    try {
+        const response = await fetch('/api/time/status');
+        const result = await response.json();
+        if (result.success && result.data) {
+            updateTimeDisplay(result.data);
+        }
+    } catch (error) {
+        console.error('Error refreshing time status:', error);
+        const metaEl = document.getElementById('timeMeta');
+        if (metaEl) metaEl.textContent = 'Error: failed to load time status';
+    } finally {
+        if (manual && refreshBtn) {
+            setTimeout(() => {
+                refreshBtn.querySelector('i').className = originalIcon || 'fa-solid fa-rotate';
+            }, 300);
+        }
+    }
+}
+
+function updateTimeDisplay(data) {
+    const systemEl = document.getElementById('systemTimeValue');
+    const metaEl = document.getElementById('timeMeta');
+
+    if (!systemEl || !metaEl) return;
+
+    const system = data.system || {};
+
+    systemEl.textContent = system.display || system.iso || '--';
+
+    const notice = "Jetson system time is sourced from TimeMachine. Make sure TimeMachine is running and GPS time is locked before PTP sync starts. If you don't need this, run timedatectl set-ntp true to use network time.";
+    const tzText = system.timezone ? `TZ: ${system.timezone} · ` : '';
+    metaEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i><span>${tzText}${notice}</span>`;
 }
 
 // ==========================================

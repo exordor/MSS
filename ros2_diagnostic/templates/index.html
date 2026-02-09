@@ -37,6 +37,21 @@
                         </button>
                     </div>
                     <div class="control-detail" id="ros2ControlDetail">--</div>
+                    <div class="time-section">
+                        <div class="time-section-header">
+                            <span class="time-label">Jetson System Time</span>
+                            <button class="btn-icon-sm" id="timeRefreshBtn" title="Refresh time">
+                                <i class="fa-solid fa-rotate"></i>
+                            </button>
+                        </div>
+                        <div class="time-row">
+                            <span class="time-value" id="systemTimeValue">--</span>
+                        </div>
+                        <div class="time-meta time-warning" id="timeMeta">
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            <span>Jetson system time is sourced from TimeMachine. Make sure TimeMachine is running and GPS time is locked before PTP sync starts. If you don't need this, run timedatectl set-ntp true to use network time.</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -78,6 +93,7 @@
                     </div>
                 </div>
             </div>
+
         </div>
     </div>
 
@@ -221,6 +237,7 @@ const CHART_CONFIG = {
     },
     refreshInterval: {{ refresh_interval or 2000 }}
 };
+const TIME_REFRESH_INTERVAL = {{ time_refresh_interval or 1000 }};
 </script>
 
 <style>
@@ -445,6 +462,81 @@ const CHART_CONFIG = {
     flex: 1;
     font-size: 0.875rem;
     padding: var(--spacing-sm) var(--spacing-md);
+}
+
+/* Time Section Styles (inside ROS2 Control card) */
+.time-section {
+    margin-top: var(--spacing-md);
+    padding-top: var(--spacing-md);
+    border-top: 1px solid var(--gray-100);
+}
+
+.time-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+}
+
+.time-section .btn-icon-sm {
+    background: transparent;
+    border: none;
+    color: var(--gray-400);
+    cursor: pointer;
+    padding: var(--spacing-xs);
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-normal);
+}
+
+.time-section .btn-icon-sm:hover {
+    background: var(--gray-100);
+    color: var(--primary);
+    transform: rotate(90deg);
+}
+
+.time-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+}
+
+.time-label {
+    font-size: 0.75rem;
+    color: var(--gray-500);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.time-value {
+    font-family: 'Courier New', monospace;
+    font-weight: 600;
+    color: var(--gray-700);
+    margin-left: auto;
+    margin-right: var(--spacing-sm);
+}
+
+.time-meta {
+    margin-top: var(--spacing-sm);
+    font-size: 0.75rem;
+    color: var(--gray-500);
+}
+
+.time-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    background: var(--warning-bg);
+    color: #92400e;
+    line-height: 1.4;
+}
+
+.time-warning i {
+    margin-top: 2px;
 }
 
 /* Alert Panel Styles */
