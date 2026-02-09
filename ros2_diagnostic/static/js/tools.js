@@ -8,8 +8,6 @@
 
 document.addEventListener('DOMContentLoaded', function() {
     initPingTool();
-    initTopicInspector();
-    initNodeInspector();
     initConfigValidator();
 });
 
@@ -102,121 +100,7 @@ async function runPingTest() {
     }
 }
 
-// ==========================================
-// Topic Inspector
-// ==========================================
-
-function initTopicInspector() {
-    // Load topics on page load
-    loadTopicsForInspector();
-}
-
-async function loadTopicsForInspector() {
-    const select = document.getElementById('topicSelect');
-
-    try {
-        const data = await API.ros2.topics();
-
-        if (data.success) {
-            const topics = data.topics || [];
-            select.innerHTML = '<option value="">Select topic...</option>' +
-                topics.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
-        }
-    } catch (error) {
-        console.error('Error loading topics:', error);
-    }
-}
-
-async function inspectTopic() {
-    const select = document.getElementById('topicSelect');
-    const resultDiv = document.getElementById('topicResult');
-
-    const topic = select.value;
-    if (!topic) {
-        resultDiv.innerHTML = '<span class="text-muted">Select a topic to inspect</span>';
-        return;
-    }
-
-    resultDiv.innerHTML = '<span class="loading"><span class="spinner"></span> Inspecting...</span>';
-
-    try {
-        const response = await fetch('/api/ros2/topic/info?topic=' + encodeURIComponent(topic));
-        const data = await response.json();
-
-        if (data.success && data.topic) {
-            const info = data.topic;
-            resultDiv.innerHTML = `
-                <div class="topic-info">
-                    <div class="info-row">
-                        <span class="info-label">Name:</span>
-                        <span class="info-value">${escapeHtml(info.name)}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Type:</span>
-                        <span class="info-value">${escapeHtml(info.type || 'N/A')}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Publishers:</span>
-                        <span class="info-value">${info.publisher_count || 0}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Subscribers:</span>
-                        <span class="info-value">${info.subscription_count || 0}</span>
-                    </div>
-                </div>
-            `;
-        } else {
-            resultDiv.innerHTML = '<span class="text-danger">Failed to get topic info</span>';
-        }
-    } catch (error) {
-        resultDiv.innerHTML = '<span class="text-danger">Error: ' + escapeHtml(error.message) + '</span>';
-    }
-}
-
-// ==========================================
-// Node Inspector
-// ==========================================
-
-function initNodeInspector() {
-    loadNodesForInspector();
-}
-
-async function loadNodesForInspector() {
-    const select = document.getElementById('nodeSelect');
-
-    try {
-        const data = await API.ros2.nodes();
-
-        if (data.success) {
-            const nodes = data.nodes || [];
-            select.innerHTML = '<option value="">Select node...</option>' +
-                nodes.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
-        }
-    } catch (error) {
-        console.error('Error loading nodes:', error);
-    }
-}
-
-async function inspectNode() {
-    const select = document.getElementById('nodeSelect');
-    const resultDiv = document.getElementById('nodeResult');
-
-    const node = select.value;
-    if (!node) {
-        resultDiv.innerHTML = '<span class="text-muted">Select a node to inspect</span>';
-        return;
-    }
-
-    resultDiv.innerHTML = '<span class="loading"><span class="spinner"></span> Inspecting...</span>';
-
-    // For now, just show basic info
-    resultDiv.innerHTML = `
-        <div class="node-info">
-            <p><strong>Node:</strong> ${escapeHtml(node)}</p>
-            <p class="text-muted">Detailed node info requires ros2 cli integration</p>
-        </div>
-    `;
-}
+// Topic/Node Inspector removed
 
 // ==========================================
 // Config Validator
@@ -264,44 +148,59 @@ async function validateConfig() {
     }
 }
 
-// ==========================================
-// Quick Commands
-// ==========================================
+function renderScriptResult(resultDiv, data) {
+    if (!data || !data.success || !data.result) {
+        const errorText = data?.error || 'Unknown error';
+        resultDiv.innerHTML = '<span class="text-danger">Failed: ' + escapeHtml(errorText) + '</span>';
+        return;
+    }
 
-async function runCommand(command) {
-    const resultDiv = document.getElementById('commandResult');
-    resultDiv.innerHTML = '<span class="loading"><span class="spinner"></span> Running...</span>';
+    const result = data.result;
+    const ok = !!result.ok;
+    const statusClass = ok ? 'text-success' : 'text-danger';
+    const exitText = result.exit_code !== undefined && result.exit_code !== null
+        ? `Exit ${result.exit_code}`
+        : 'Exit N/A';
+    const durationText = result.duration_ms !== undefined
+        ? ` · ${result.duration_ms} ms`
+        : '';
+    const sudoText = result.used_sudo ? ' · sudo' : '';
+    const truncatedText = result.truncated ? ' · Output truncated' : '';
+    const output = result.output || 'No output';
+
+    resultDiv.innerHTML = `
+        <div class="${statusClass}">
+            <strong>${ok ? 'Completed' : 'Completed with errors'}</strong>
+            <span>(${exitText}${durationText}${sudoText}${truncatedText})</span>
+        </div>
+        <pre class="log-content">${escapeHtml(output)}</pre>
+    `;
+}
+
+async function runPtpStatus() {
+    const resultDiv = document.getElementById('ptpStatusResult');
+    if (!resultDiv) return;
+    resultDiv.innerHTML = '<span class="loading"><span class="spinner"></span> Running PTP status...</span>';
 
     try {
-        let endpoint = '';
-        switch (command) {
-            case 'topics':
-                endpoint = '/api/ros2/topics';
-                break;
-            case 'nodes':
-                endpoint = '/api/ros2/nodes';
-                break;
-            case 'freq':
-            case 'info':
-                resultDiv.innerHTML = '<span class="text-muted">Command not yet implemented</span>';
-                return;
-        }
-
-        const data = await fetchWithRetry(endpoint);
-
-        if (data.success) {
-            let content = '';
-            if (command === 'topics') {
-                content = (data.topics || []).map(t => escapeHtml(t)).join('\n');
-            } else if (command === 'nodes') {
-                content = (data.nodes || []).map(n => escapeHtml(n)).join('\n');
-            }
-
-            resultDiv.innerHTML = '<pre class="log-content">' + content + '</pre>';
-        } else {
-            resultDiv.innerHTML = '<span class="text-danger">Command failed</span>';
-        }
+        const data = await API.tools.ptpStatus();
+        renderScriptResult(resultDiv, data);
     } catch (error) {
         resultDiv.innerHTML = '<span class="text-danger">Error: ' + escapeHtml(error.message) + '</span>';
     }
 }
+
+async function runPtpSyncVerify() {
+    const resultDiv = document.getElementById('ptpSyncVerifyResult');
+    if (!resultDiv) return;
+    resultDiv.innerHTML = '<span class="loading"><span class="spinner"></span> Running PTP sync verification...</span>';
+
+    try {
+        const data = await API.tools.ptpSyncVerify();
+        renderScriptResult(resultDiv, data);
+    } catch (error) {
+        resultDiv.innerHTML = '<span class="text-danger">Error: ' + escapeHtml(error.message) + '</span>';
+    }
+}
+
+// Quick Commands removed (replaced by PTP tools)

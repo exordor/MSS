@@ -34,7 +34,7 @@ from config import (
     ROS2_CONFIG, ROS2_CONTROL, ROSBAG_CONFIG, SENSOR_IPS, SENSOR_THRESHOLDS,
     EXPECTED_NODES, IGNORED_NODES, SENSOR_NODES, ROS2_TOPICS,
     ENABLE_TOPIC_DETAILS, CACHE_TTL, LOG_FILES, LOG_ROOT, UI_CONFIG, PROJECT_ROOT,
-    TOOLS_CONFIG_FILES, EVENT_LOG_CONFIG, SENSOR_I2C, TIME_CONFIG
+    TOOLS_CONFIG_FILES, TOOLS_SCRIPTS, EVENT_LOG_CONFIG, SENSOR_I2C, TIME_CONFIG
 )
 from diagnostics import ROS2Monitor, ROS2Controller
 from diagnostics.rosbag_controller import get_rosbag_controller
@@ -2883,6 +2883,76 @@ async def export_event_logs(
 # Tools API Routes (Kept for actions)
 # =============================================================================
 
+_ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+
+
+def _strip_ansi(text: str) -> str:
+    if not text:
+        return ""
+    return _ANSI_ESCAPE_RE.sub("", text)
+
+
+def _run_tool_script(path: str, timeout: float = 20.0, allow_sudo: bool = True) -> Dict[str, Any]:
+    if not path:
+        return {"ok": False, "error": "script_path_empty"}
+    if not os.path.exists(path):
+        return {"ok": False, "error": "script_not_found", "path": path}
+
+    try:
+        import subprocess
+        use_sudo = allow_sudo and os.geteuid() != 0
+        sudo_path = None
+        if use_sudo:
+            sudo_path = shutil.which("sudo")
+            if not sudo_path:
+                return {"ok": False, "error": "sudo_missing"}
+
+        env = os.environ.copy()
+        if "/usr/sbin" not in env.get("PATH", ""):
+            env["PATH"] = f"/usr/sbin:/sbin:{env.get('PATH', '')}".strip(":")
+
+        cmd = ["/bin/bash", path]
+        if use_sudo:
+            cmd = [sudo_path, "-n", "/bin/bash", path]
+
+        start_time = time.time()
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env
+        )
+        duration_ms = int((time.time() - start_time) * 1000)
+        output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+        output = _strip_ansi(output).replace("\r\n", "\n").replace("\r", "\n")
+
+        truncated = False
+        max_chars = 8000
+        if len(output) > max_chars:
+            output = output[:max_chars].rstrip() + "\n... (output truncated)"
+            truncated = True
+
+        return {
+            "ok": proc.returncode == 0,
+            "exit_code": proc.returncode,
+            "output": output,
+            "duration_ms": duration_ms,
+            "truncated": truncated,
+            "used_sudo": use_sudo,
+        }
+    except subprocess.TimeoutExpired as exc:
+        output = ((exc.stdout or "") + "\n" + (exc.stderr or "")).strip()
+        output = _strip_ansi(output)
+        return {
+            "ok": False,
+            "exit_code": None,
+            "error": "timeout",
+            "output": output,
+        }
+    except Exception as exc:
+        return {"ok": False, "exit_code": None, "error": str(exc)}
+
 class PingRequest(BaseModel):
     host: str
     count: int = 4
@@ -2930,6 +3000,28 @@ async def tool_config_validate(req: ConfigValidateRequest) -> JSONResponse:
     except Exception as e:
         logger.error(f"Error in config validation: {e}")
         return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/tools/ptp/status")
+async def tool_ptp_status() -> JSONResponse:
+    """Run PTP status script and return output."""
+    result = _run_tool_script(TOOLS_SCRIPTS.get("ptp_status"))
+    if result.get("error") in {"script_path_empty", "script_not_found"}:
+        return JSONResponse(content={"success": False, "error": result.get("error"), "result": result}, status_code=404)
+    if result.get("error"):
+        return JSONResponse(content={"success": False, "error": result.get("error"), "result": result}, status_code=500)
+    return JSONResponse(content={"success": True, "result": result})
+
+
+@app.post("/api/tools/ptp/sync-verify")
+async def tool_ptp_sync_verify() -> JSONResponse:
+    """Run PTP sync verification script and return output."""
+    result = _run_tool_script(TOOLS_SCRIPTS.get("ptp_sync_verify"))
+    if result.get("error") in {"script_path_empty", "script_not_found"}:
+        return JSONResponse(content={"success": False, "error": result.get("error"), "result": result}, status_code=404)
+    if result.get("error"):
+        return JSONResponse(content={"success": False, "error": result.get("error"), "result": result}, status_code=500)
+    return JSONResponse(content={"success": True, "result": result})
 
 
 # =============================================================================

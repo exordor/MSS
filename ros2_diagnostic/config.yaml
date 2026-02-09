@@ -265,6 +265,8 @@ tools:
     camera: "config/camera/ros2.yaml"              # Camera driver configuration
     imu: "config/imu/sbg_ros2.yaml"                # IMU driver configuration
     thruster: "config/thruster/thruster_wifi.yaml" # Thruster configuration
+  ptp_status_script: "scripts/ptp_status.sh"       # PTP network status script
+  ptp_sync_verify_script: "scripts/ptp_sync_verify.sh" # PTP system clock sync verification script
 
 # ------------------------------------------------------------------------------
 # FastAPI / WebSocket Configuration

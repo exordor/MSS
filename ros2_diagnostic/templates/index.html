@@ -51,6 +51,12 @@
                             <i class="fa-solid fa-triangle-exclamation"></i>
                             <span>Jetson system time is sourced from TimeMachine. Make sure TimeMachine is running and GPS time is locked before PTP sync starts. If you don't need this, run timedatectl set-ntp true to use network time.</span>
                         </div>
+                        <div class="time-actions">
+                            <a href="/tools#ptp-sync" class="btn btn-secondary nav-link-new-tab" data-window="ros2-tools">
+                                <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                                PTP Verification
+                            </a>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -537,6 +543,18 @@ const TIME_REFRESH_INTERVAL = {{ time_refresh_interval or 1000 }};
 
 .time-warning i {
     margin-top: 2px;
+}
+
+.time-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: var(--spacing-sm);
+}
+
+.time-actions .btn {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.75rem;
+    border-radius: var(--radius-sm);
 }
 
 /* Alert Panel Styles */

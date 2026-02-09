@@ -42,54 +42,6 @@
             </div>
         </div>
 
-        <!-- Topic Inspector -->
-        <div class="tool-card">
-            <div class="tool-header">
-                <div class="tool-icon">
-                    <i class="fa-solid fa-stream"></i>
-                </div>
-                <h3>Topic Inspector</h3>
-            </div>
-            <div class="tool-body">
-                <p class="tool-description">Inspect ROS2 topic details including type, QoS, and publishers/subscribers.</p>
-                <div class="tool-controls">
-                    <select id="topicSelect" class="tool-select">
-                        <option value="">Select topic...</option>
-                    </select>
-                    <button class="tool-btn" onclick="inspectTopic()">
-                        <i class="fa-solid fa-search"></i> Inspect
-                    </button>
-                </div>
-                <div class="tool-result" id="topicResult">
-                    <span class="result-placeholder">Select a topic to inspect</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Node Inspector -->
-        <div class="tool-card">
-            <div class="tool-header">
-                <div class="tool-icon">
-                    <i class="fa-solid fa-cubes"></i>
-                </div>
-                <h3>Node Inspector</h3>
-            </div>
-            <div class="tool-body">
-                <p class="tool-description">View ROS2 node details including subscriptions and publications.</p>
-                <div class="tool-controls">
-                    <select id="nodeSelect" class="tool-select">
-                        <option value="">Select node...</option>
-                    </select>
-                    <button class="tool-btn" onclick="inspectNode()">
-                        <i class="fa-solid fa-search"></i> Inspect
-                    </button>
-                </div>
-                <div class="tool-result" id="nodeResult">
-                    <span class="result-placeholder">Select a node to inspect</span>
-                </div>
-            </div>
-        </div>
-
         <!-- Config Validator -->
         <div class="tool-card">
             <div class="tool-header">
@@ -118,32 +70,44 @@
             </div>
         </div>
 
-        <!-- System Commands -->
+        <!-- PTP Status -->
         <div class="tool-card wide">
             <div class="tool-header">
                 <div class="tool-icon">
-                    <i class="fa-solid fa-terminal"></i>
+                    <i class="fa-solid fa-clock"></i>
                 </div>
-                <h3>Quick Commands</h3>
+                <h3>PTP Status</h3>
             </div>
             <div class="tool-body">
-                <p class="tool-description">Execute common diagnostic commands.</p>
+                <p class="tool-description">Check PTP service, master clock, port, and hardware clock status.</p>
                 <div class="tool-controls">
-                    <button class="tool-btn small" onclick="runCommand('topics')">
-                        <i class="fa-solid fa-list"></i> List Topics
-                    </button>
-                    <button class="tool-btn small" onclick="runCommand('nodes')">
-                        <i class="fa-solid fa-cubes"></i> List Nodes
-                    </button>
-                    <button class="tool-btn small" onclick="runCommand('freq')">
-                        <i class="fa-solid fa-gauge"></i> Topic Hz
-                    </button>
-                    <button class="tool-btn small" onclick="runCommand('info')">
-                        <i class="fa-solid fa-info"></i> System Info
+                    <button class="tool-btn" onclick="runPtpStatus()">
+                        <i class="fa-solid fa-play"></i> Run Status
                     </button>
                 </div>
-                <div class="tool-result wide" id="commandResult">
-                    <span class="result-placeholder">Command output will appear here</span>
+                <div class="tool-result wide" id="ptpStatusResult">
+                    <span class="result-placeholder">PTP status output will appear here</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- PTP Sync Verification -->
+        <div class="tool-card wide" id="ptp-sync">
+            <div class="tool-header">
+                <div class="tool-icon">
+                    <i class="fa-solid fa-arrows-rotate"></i>
+                </div>
+                <h3>PTP Sync Verification</h3>
+            </div>
+            <div class="tool-body">
+                <p class="tool-description">Verify phc2sys synchronization and compare PHC vs system clock.</p>
+                <div class="tool-controls">
+                    <button class="tool-btn" onclick="runPtpSyncVerify()">
+                        <i class="fa-solid fa-play"></i> Run Verify
+                    </button>
+                </div>
+                <div class="tool-result wide" id="ptpSyncVerifyResult">
+                    <span class="result-placeholder">PTP sync verification output will appear here</span>
                 </div>
             </div>
         </div>

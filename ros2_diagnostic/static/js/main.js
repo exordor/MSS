@@ -617,6 +617,14 @@ const API = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type })
         }).then(r => r.json()),
+        ptpStatus: () => fetch('/api/tools/ptp/status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        }).then(r => r.json()),
+        ptpSyncVerify: () => fetch('/api/tools/ptp/sync-verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        }).then(r => r.json()),
     },
 };
 

@@ -105,8 +105,13 @@ CACHE_TTL = monitor_cfg.get("cache_ttl", {})
 CHART_HISTORY = cfg.get("charts", {})
 UI_CONFIG = cfg.get("ui", {})
 
+tools_cfg = cfg.get("tools", {})
 TOOLS_CONFIG_FILES = {
-    key: _resolve(value) for key, value in cfg.get("tools", {}).get("config_files", {}).items()
+    key: _resolve(value) for key, value in tools_cfg.get("config_files", {}).items()
+}
+TOOLS_SCRIPTS = {
+    "ptp_status": _resolve(tools_cfg.get("ptp_status_script", "scripts/ptp_status.sh")),
+    "ptp_sync_verify": _resolve(tools_cfg.get("ptp_sync_verify_script", "scripts/ptp_sync_verify.sh")),
 }
 
 # Time synchronization / PHC configuration
