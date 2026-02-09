@@ -64,22 +64,48 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "⏱️  3. Clock Comparison (PHC vs System)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo -e "${YELLOW}Note: Results are for reference only. Check ptp4l and phc2sys logs for actual sync status.${NC}"
 echo ""
 
-# Get PHC time
-PHC_TIME=$(phc_ctl $INTERFACE get 2>/dev/null | grep "clock time" | awk '{print $4}' || echo "N/A")
-if [ "$PHC_TIME" != "N/A" ]; then
-    PHC_SEC=$(echo $PHC_TIME | cut -d'.' -f1)
-    PHC_NSEC=$(echo $PHC_TIME | cut -d'.' -f2)
-    PHC_DATE=$(date -d @$PHC_SEC +"%Y-%m-%d %H:%M:%S")
-    echo "PHC Time (eno1):        $PHC_DATE.$PHC_NSEC"
-else
-    echo -e "${RED}PHC Time (eno1):        Cannot read${NC}"
+# Get PHC time (raw TAI time, no conversion)
+PHC_DEVICE="/dev/ptp0"
+PHC_TIME=$(phc_ctl $PHC_DEVICE get 2>/dev/null | sed -n 's/.*clock time is \([0-9]\+\(\.[0-9]\+\)\?\).*/\1/p')
+
+# Get System time once (already in UTC)
+SYS_SEC=$(date +%s)
+SYS_NSEC=$(date +%N)
+SYS_TIME=$(date -d "@$SYS_SEC" +"%Y-%m-%d %H:%M:%S").$SYS_NSEC
+
+if [ -z "$PHC_TIME" ]; then
+    PHC_TIME="N/A"
 fi
 
-# Get System time
-SYS_TIME=$(date +"%Y-%m-%d %H:%M:%S.%N")
-echo "System Time:            $SYS_TIME"
+if [ "$PHC_TIME" != "N/A" ]; then
+    PHC_SEC="${PHC_TIME%%.*}"
+    PHC_NSEC="${PHC_TIME#*.}"
+    if [ "$PHC_TIME" = "$PHC_SEC" ]; then
+        PHC_NSEC="000000000"
+    fi
+    # Display PHC time as-is (TAI time)
+    if PHC_DATE=$(date -d "@$PHC_SEC" +"%Y-%m-%d %H:%M:%S" 2>/dev/null); then
+        echo "PHC Time (${PHC_DEVICE}):        $PHC_DATE.$PHC_NSEC (TAI)"
+    else
+        echo -e "${RED}PHC Time (${PHC_DEVICE}):        Invalid value ($PHC_TIME)${NC}"
+    fi
+    echo -e "                        ${YELLOW}(PHC uses TAI, system uses UTC; difference ~37 seconds expected)${NC}"
+else
+    echo -e "${RED}PHC Time (${PHC_DEVICE}):        Cannot read${NC}"
+fi
+
+echo "System Time:            $SYS_TIME (UTC)"
+
+# Display raw timestamps for comparison
+if [ "$PHC_TIME" != "N/A" ]; then
+    echo ""
+    echo "Raw Timestamps:"
+    echo "  PHC (TAI):             $PHC_TIME"
+    echo "  System (UTC):          $SYS_SEC.$SYS_NSEC"
+fi
 echo ""
 
 # 4. PTP Port Status
