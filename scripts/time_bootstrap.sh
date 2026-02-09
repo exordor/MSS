@@ -5,7 +5,7 @@ set -euo pipefail
 TM_IP="${TM_IP:-192.168.0.20}"
 PTP_DEV="${PTP_DEV:-/dev/ptp0}"
 IFACE="${IFACE:-eno1}"
-TIMEOUT="${TIMEOUT:-240}"
+TIMEOUT="${TIMEOUT:-3600}"
 INTERVAL="${INTERVAL:-2}"
 LOG_FILE="${LOG_FILE:-/home/eagrumo/mss_lecture/logs/time-bootstrap.log}"
 
