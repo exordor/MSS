@@ -4,6 +4,7 @@
 #include "thruster_control/msg/speed_data.hpp"
 #include "thruster_control/msg/connection_status.hpp"
 #include "thruster_control/msg/thruster_metrics.hpp"
+#include "thruster_control/msg/temp_humidity.hpp"
 
 #include <algorithm>
 #include <arpa/inet.h>
@@ -343,6 +344,7 @@ public:
     // Publishers
     status_pub_ = create_publisher<thruster_control::msg::ThrusterStatusPWM>("thruster_status_pwm", 10);
     speed_pub_ = create_publisher<thruster_control::msg::SpeedData>("speed_data", 10);
+    temp_humidity_pub_ = create_publisher<thruster_control::msg::TempHumidity>("temp_humidity", 10);
     connection_pub_ = create_publisher<thruster_control::msg::ConnectionStatus>("thruster_connection_status", 10);
     metrics_pub_ = create_publisher<thruster_control::msg::ThrusterMetrics>("thruster_metrics", 10);
 
@@ -667,6 +669,29 @@ private:
           }
         }
       }
+      // Check for temperature & humidity message: D <temp> <humidity>
+      else if (!line.empty() && line[0] == 'D') {
+        RCLCPP_INFO(get_logger(), "[DEBUG] Received 'D' message: [%s]", line.c_str());
+        auto parsed = parseTempHumidity(line);
+        if (parsed.has_value()) {
+          RCLCPP_INFO(get_logger(), "[DEBUG] Parsed: temp=%.2f, hum=%.2f", parsed->temperature, parsed->humidity);
+          if (temp_humidity_pub_) {
+            thruster_control::msg::TempHumidity msg;
+            msg.header.stamp = this->get_clock()->now();
+            msg.header.frame_id = status_frame_id_;
+            msg.temperature = parsed->temperature;
+            msg.humidity = parsed->humidity;
+            temp_humidity_pub_->publish(msg);
+            stats_.rx_temp_humidity++;
+            RCLCPP_INFO(get_logger(), "[DEBUG] Published temp_humidity message");
+          } else {
+            RCLCPP_ERROR(get_logger(), "[DEBUG] temp_humidity_pub_ is NULL!");
+          }
+        } else {
+          stats_.parse_errors++;
+          RCLCPP_ERROR(get_logger(), "[DEBUG] Failed to parse temp/humidity: [%s]", line.c_str());
+        }
+      }
       // Check for heartbeat (from broadcast on port 8889 or unicast)
       else if (line == "HEARTBEAT") {
         stats_.rx_heartbeat++;
@@ -723,6 +748,7 @@ private:
     msg.rx_heartbeat = stats_.rx_heartbeat;
     msg.rx_status = stats_.rx_status;
     msg.rx_speed = stats_.rx_speed;
+    msg.rx_temp_humidity = stats_.rx_temp_humidity;
     msg.parse_errors = stats_.parse_errors;
     msg.timeouts = stats_.timeouts;
     msg.latency_ms = 0.0;  // Latency measurement not available (PING/PONG removed)
@@ -756,6 +782,12 @@ private:
     double total_liters{0.0};
   };
 
+  struct TempHumiditySample
+  {
+    double temperature{0.0};  // Temperature in Celsius
+    double humidity{0.0};     // Humidity in percentage
+  };
+
   struct Stats
   {
     uint64_t tx_packets{0};
@@ -764,6 +796,7 @@ private:
     uint64_t rx_heartbeat{0};
     uint64_t rx_status{0};
     uint64_t rx_speed{0};
+    uint64_t rx_temp_humidity{0};
     uint64_t parse_errors{0};
     uint64_t timeouts{0};
     uint64_t bytes_received{0};
@@ -771,7 +804,7 @@ private:
 
     void reset()
     {
-      tx_packets = tx_ping = rx_packets = rx_heartbeat = rx_status = rx_speed = 0;
+      tx_packets = tx_ping = rx_packets = rx_heartbeat = rx_status = rx_speed = rx_temp_humidity = 0;
       parse_errors = timeouts = 0;
       bytes_received = 0;
       stats_start = std::chrono::steady_clock::now();
@@ -863,6 +896,40 @@ private:
     return sample;
   }
 
+  static std::optional<TempHumiditySample> parseTempHumidity(const std::string & line)
+  {
+    std::vector<double> values;
+    std::string current;
+    for (char c : line) {
+      if (std::isdigit(static_cast<unsigned char>(c)) || c == '.' || c == '-' || c == '+') {
+        current.push_back(c);
+      } else if (!current.empty()) {
+        try {
+          values.push_back(std::stod(current));
+        } catch (const std::exception &) {
+          return std::nullopt;
+        }
+        current.clear();
+      }
+    }
+    if (!current.empty()) {
+      try {
+        values.push_back(std::stod(current));
+      } catch (const std::exception &) {
+        return std::nullopt;
+      }
+    }
+
+    if (values.size() < 2) {
+      return std::nullopt;
+    }
+
+    TempHumiditySample sample;
+    sample.temperature = values[0];
+    sample.humidity = values[1];
+    return sample;
+  }
+
   static std::string formatCommand(int32_t left_pwm, int32_t right_pwm)
   {
     std::ostringstream oss;
@@ -904,6 +971,7 @@ private:
   // Publishers
   rclcpp::Publisher<thruster_control::msg::ThrusterStatusPWM>::SharedPtr status_pub_;
   rclcpp::Publisher<thruster_control::msg::SpeedData>::SharedPtr speed_pub_;
+  rclcpp::Publisher<thruster_control::msg::TempHumidity>::SharedPtr temp_humidity_pub_;
   rclcpp::Publisher<thruster_control::msg::ConnectionStatus>::SharedPtr connection_pub_;
   rclcpp::Publisher<thruster_control::msg::ThrusterMetrics>::SharedPtr metrics_pub_;
 

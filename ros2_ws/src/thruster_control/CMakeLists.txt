@@ -14,6 +14,7 @@ set(msg_files
 	"msg/ThrusterStatusPWM.msg"
 	"msg/ThrusterCmdPWM.msg"
 	"msg/SpeedData.msg"
+	"msg/TempHumidity.msg"
 	"msg/ConnectionStatus.msg"
 	"msg/ThrusterMetrics.msg"
 )
