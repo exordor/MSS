@@ -7,6 +7,7 @@ uint32 rx_packets      # Total packets received
 uint32 rx_heartbeat    # Heartbeat packets received
 uint32 rx_status       # Status messages received
 uint32 rx_speed        # Speed data messages received
+uint32 rx_temp_humidity  # Temp/Humidity messages received
 uint32 parse_errors    # Failed message parses
 uint32 timeouts        # Timeout events
 
