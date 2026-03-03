@@ -669,27 +669,30 @@ private:
           }
         }
       }
-      // Check for temperature & humidity message: D <temp> <humidity>
+      // Check for temperature & humidity message: D <temp1> <hum1> <temp2> <hum2>
       else if (!line.empty() && line[0] == 'D') {
-        RCLCPP_INFO(get_logger(), "[DEBUG] Received 'D' message: [%s]", line.c_str());
+        // RCLCPP_INFO(get_logger(), "[DEBUG] Received 'D' message: [%s]", line.c_str());
         auto parsed = parseTempHumidity(line);
         if (parsed.has_value()) {
-          RCLCPP_INFO(get_logger(), "[DEBUG] Parsed: temp=%.2f, hum=%.2f", parsed->temperature, parsed->humidity);
+          // RCLCPP_INFO(get_logger(), "[DEBUG] Parsed: t1=%.2f h1=%.2f t2=%.2f h2=%.2f",
+          //             parsed->temp1, parsed->humidity1, parsed->temp2, parsed->humidity2);
           if (temp_humidity_pub_) {
             thruster_control::msg::TempHumidity msg;
             msg.header.stamp = this->get_clock()->now();
             msg.header.frame_id = status_frame_id_;
-            msg.temperature = parsed->temperature;
-            msg.humidity = parsed->humidity;
+            msg.temp1 = parsed->temp1;
+            msg.humidity1 = parsed->humidity1;
+            msg.temp2 = parsed->temp2;
+            msg.humidity2 = parsed->humidity2;
             temp_humidity_pub_->publish(msg);
             stats_.rx_temp_humidity++;
-            RCLCPP_INFO(get_logger(), "[DEBUG] Published temp_humidity message");
+            // RCLCPP_INFO(get_logger(), "[DEBUG] Published temp_humidity message");
           } else {
             RCLCPP_ERROR(get_logger(), "[DEBUG] temp_humidity_pub_ is NULL!");
           }
         } else {
           stats_.parse_errors++;
-          RCLCPP_ERROR(get_logger(), "[DEBUG] Failed to parse temp/humidity: [%s]", line.c_str());
+          // RCLCPP_ERROR(get_logger(), "[DEBUG] Failed to parse temp/humidity: [%s]", line.c_str());
         }
       }
       // Check for heartbeat (from broadcast on port 8889 or unicast)
@@ -784,8 +787,10 @@ private:
 
   struct TempHumiditySample
   {
-    double temperature{0.0};  // Temperature in Celsius
-    double humidity{0.0};     // Humidity in percentage
+    double temp1{0.0};     // Temperature 1 in Celsius
+    double humidity1{0.0}; // Humidity 1 in percentage
+    double temp2{0.0};     // Temperature 2 in Celsius
+    double humidity2{0.0}; // Humidity 2 in percentage
   };
 
   struct Stats
@@ -920,13 +925,15 @@ private:
       }
     }
 
-    if (values.size() < 2) {
+    if (values.size() < 4) {
       return std::nullopt;
     }
 
     TempHumiditySample sample;
-    sample.temperature = values[0];
-    sample.humidity = values[1];
+    sample.temp1 = values[0];
+    sample.humidity1 = values[1];
+    sample.temp2 = values[2];
+    sample.humidity2 = values[3];
     return sample;
   }
 
