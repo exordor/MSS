@@ -21,4 +21,5 @@ topics:
   - /thruster_status_pwm
   - /speed_data
   - /battery_voltage
+  - /temp_humidity
 output: ros2_bringup_all_
