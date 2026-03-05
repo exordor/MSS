@@ -198,6 +198,10 @@ function updateSensorsDisplay(sensorsData) {
 
     const allSensors = sensorsCache;
 
+    // Update temperature & humidity display in ROS2 Control card
+    // Use cached allSensors to ensure temp_humidity persists across partial updates
+    updateTempHumidityDisplay(allSensors);
+
     // Track counts
     const counts = { ok: 0, connected: 0, warning: 0, stopped: 0, disconnected: 0, critical: 0 };
 
@@ -304,6 +308,38 @@ function updateSensorsDisplay(sensorsData) {
             countEl.textContent = '--';
             countEl.className = 'status-count';
         }
+    }
+}
+
+function updateTempHumidityDisplay(sensors) {
+    const tempHumidityEl = document.getElementById('tempHumidityValue');
+    if (!tempHumidityEl) {
+        console.log('[TempHumidity] Element not found');
+        return;
+    }
+
+    console.log('[TempHumidity] sensors:', sensors);
+    const thruster = sensors && sensors.thruster;
+    console.log('[TempHumidity] thruster:', thruster);
+    const tempHumidity = thruster && thruster.temp_humidity;
+    console.log('[TempHumidity] temp_humidity:', tempHumidity);
+
+    if (tempHumidity && tempHumidity.temp1 !== null && tempHumidity.temp1 !== undefined) {
+        const temp1 = tempHumidity.temp1.toFixed(1);
+        const hum1 = tempHumidity.humidity1.toFixed(0);
+        
+        // Show both sensors if available
+        if (tempHumidity.temp2 !== null && tempHumidity.temp2 !== undefined) {
+            const temp2 = tempHumidity.temp2.toFixed(1);
+            const hum2 = tempHumidity.humidity2.toFixed(0);
+            tempHumidityEl.textContent = `JetsonBox: ${temp1}°C/${hum1}% | ArduinoBox: ${temp2}°C/${hum2}%`;
+        } else {
+            tempHumidityEl.textContent = `${temp1}°C / ${hum1}%`;
+        }
+        console.log('[TempHumidity] Updated to:', tempHumidityEl.textContent);
+    } else {
+        tempHumidityEl.textContent = '--';
+        console.log('[TempHumidity] No data, showing --');
     }
 }
 

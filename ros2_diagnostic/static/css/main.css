@@ -280,6 +280,25 @@ body {
     font-weight: 600;
     color: var(--gray-800);
     font-size: 1rem;
+    flex: 1;
+}
+
+.card-header-extra {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    margin-left: auto;
+}
+
+.temp-humidity-label {
+    color: var(--gray-500);
+    font-size: 0.875rem;
+}
+
+.temp-humidity-value {
+    font-weight: 500;
+    color: var(--gray-700);
+    font-size: 0.875rem;
 }
 
 .card-body {
