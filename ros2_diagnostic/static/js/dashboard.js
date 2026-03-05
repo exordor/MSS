@@ -208,11 +208,9 @@ function updateSensorsDisplay(sensorsData) {
     // Update each sensor row
     for (const [sensorName, sensorData] of Object.entries(allSensors)) {
         const status = sensorData.status || 'stopped';
-        // For thruster, use 'value' field (UDP heartbeat) instead of 'connected' (ping)
+        // For thruster, use 'connected' field
         // For other sensors, use 'connected' field
-        const connected = sensorName === 'thruster'
-            ? (sensorData.value === 'Online')
-            : (sensorData.connected === 'Connected');
+        const connected = sensorData.connected === 'Connected';
 
         // Update counts
         if (status === 'ok') counts.ok++;
