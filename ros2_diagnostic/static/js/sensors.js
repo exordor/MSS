@@ -196,6 +196,26 @@ function updateThrusterPanel(data) {
     if (latencyEl && data.packet_loss) {
         latencyEl.textContent = data.packet_loss + ' ms';
     }
+
+    // Update temperature & humidity
+    const tempHumidity = data.temp_humidity || {};
+    const temp1El = document.getElementById('thrusterTemp1');
+    const hum1El = document.getElementById('thrusterHum1');
+    const temp2El = document.getElementById('thrusterTemp2');
+    const hum2El = document.getElementById('thrusterHum2');
+
+    if (temp1El && tempHumidity.temp1 !== undefined && tempHumidity.temp1 !== null) {
+        temp1El.textContent = tempHumidity.temp1.toFixed(1) + ' °C';
+    }
+    if (hum1El && tempHumidity.humidity1 !== undefined && tempHumidity.humidity1 !== null) {
+        hum1El.textContent = tempHumidity.humidity1.toFixed(0) + ' %';
+    }
+    if (temp2El && tempHumidity.temp2 !== undefined && tempHumidity.temp2 !== null) {
+        temp2El.textContent = tempHumidity.temp2.toFixed(1) + ' °C';
+    }
+    if (hum2El && tempHumidity.humidity2 !== undefined && tempHumidity.humidity2 !== null) {
+        hum2El.textContent = tempHumidity.humidity2.toFixed(0) + ' %';
+    }
 }
 
 function updateBatteryPanel(data) {

@@ -946,7 +946,8 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
                 final_status = 'connected'
                 final_color = 'blue'
 
-        return {
+        # Build final result
+        result = {
             'status': final_status,
             'color': final_color,
             'value': summary.get('value', 'N/A'),
@@ -959,6 +960,12 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
             'topic_available': topic_available,
             'node_available': node_available,
         }
+        
+        # Add temperature & humidity data for thruster sensor
+        if sensor_name == 'thruster' and 'temp_humidity' in summary:
+            result['temp_humidity'] = summary['temp_humidity']
+        
+        return result
     except Exception as e:
         logger.debug(f"Error checking {sensor_name}: {e}")
         return {
@@ -968,7 +975,6 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
             'message': str(e),
             'connected': '--',
         }
-
 
 async def check_sensor_async(sensor_name: str) -> Dict[str, Any]:
     """Async wrapper for sensor check using thread pool executor."""
@@ -1535,6 +1541,7 @@ def collect_sensor_status() -> Dict[str, Any]:
                 'topic_available': topic_available,
                 'node_available': node_available,
                 'voltages': summary.get('voltages', {}),
+                'temp_humidity': summary.get('temp_humidity', {}),
             }
         except Exception as e:
             logger.debug(f"Error collecting {name}: {e}")

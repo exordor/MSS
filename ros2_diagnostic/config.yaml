@@ -160,6 +160,7 @@ sensors:
 
     thruster:
       status: "/thruster_status_pwm"   # Thruster status and PWM values
+      temp_humidity: "/temp_humidity"  # Temperature & humidity data (2 sensors)
 
     battery:
       voltage: "/battery_voltage"      # Battery voltage data from ADS1115

@@ -7,6 +7,7 @@ Monitors Thruster WiFi connection health using UDP heartbeat detection
 import logging
 import select
 import socket
+import subprocess
 import threading
 import time
 from datetime import datetime
@@ -24,7 +25,7 @@ class ThrusterDiagnostic(BaseDiagnostic):
 
     Mirrors the architecture used in thruster_wifi_node.cpp:
     - Binds to local UDP port 28889 to receive heartbeat/data
-    - Detects any UDP data from thruster (HEARTBEAT, S status, F flow)
+    - Detects any UDP data from thruster (HEARTBEAT, S status, F flow, D temp/humidity)
     - Uses timeout-based detection (no data for >udp_timeout = offline)
     """
 
@@ -35,9 +36,19 @@ class ThrusterDiagnostic(BaseDiagnostic):
         thresholds = config.get('SENSOR_THRESHOLDS', {}).get('thruster', {})
 
         self.thruster_ip = self.ips.get('thruster', '192.168.50.100')
-        # Monitor UDP port (receives HEARTBEAT, S status, F flow from Arduino)
+        # Monitor UDP port (receives HEARTBEAT, S status, F flow, D temp/humidity from Arduino)
         self.monitor_port = 28889
         self.status_topic = self.topics.get('status', '/thruster_status_pwm')
+        self.temp_humidity_topic = self.topics.get('temp_humidity', '/temp_humidity')
+
+        # Temperature & humidity data cache
+        self._latest_temp_humidity = {
+            'temp1': None,
+            'humidity1': None,
+            'temp2': None,
+            'humidity2': None,
+        }
+        self._last_temp_humidity_time = 0
 
         # UDP timeout (matching driver's udp_timeout parameter)
         self.udp_timeout = thresholds.get('heartbeat_timeout', 5.0)
@@ -144,9 +155,12 @@ class ThrusterDiagnostic(BaseDiagnostic):
                                         self._heartbeat_count += 1
                                         logger.debug(f"Thruster heartbeat received: {data_str}")
 
-                                    # Also track other data (S status, F flow)
-                                    if data_str and data_str[0] in ['S', 'F']:
+                                    # Also track other data (S status, F flow, D temp/humidity)
+                                    if data_str and data_str[0] in ['S', 'F', 'D']:
                                         logger.debug(f"Thruster data received: {data_str}")
+                                        # Parse D message for temperature & humidity
+                                        if data_str[0] == 'D':
+                                            self._parse_temp_humidity(data_str)
 
                     except (socket.error, UnicodeDecodeError) as e:
                         pass
@@ -166,6 +180,122 @@ class ThrusterDiagnostic(BaseDiagnostic):
             except Exception:
                 pass
             self._udp_socket = None
+
+    def _parse_temp_humidity(self, data_str: str):
+        """Parse temperature & humidity from D message
+
+        Format: D <temp1> <hum1> <temp2> <hum2>
+        Example: D 25.30 65.00 24.80 68.50
+        """
+        try:
+            parts = data_str.split()
+            if len(parts) >= 5 and parts[0] == 'D':
+                self._latest_temp_humidity['temp1'] = float(parts[1])
+                self._latest_temp_humidity['humidity1'] = float(parts[2])
+                self._latest_temp_humidity['temp2'] = float(parts[3])
+                self._latest_temp_humidity['humidity2'] = float(parts[4])
+                self._last_temp_humidity_time = time.time()
+                logger.debug(f"Temp/Humidity parsed: {self._latest_temp_humidity}")
+        except (ValueError, IndexError) as e:
+            logger.debug(f"Failed to parse temp/humidity: {e}")
+
+    def _read_temp_humidity(self) -> Dict[str, Optional[float]]:
+        """Read latest temperature & humidity data from ROS2 topic
+
+        Uses rclpy to directly subscribe and read one message.
+        Falls back to UDP-parsed data if topic read fails.
+
+        Returns:
+            Dict with temperature and humidity values or cached data
+        """
+        # First try to use UDP-parsed data (more recent)
+        if self._last_temp_humidity_time > 0:
+            time_since = time.time() - self._last_temp_humidity_time
+            if time_since < 5.0:  # Data is fresh (< 5 seconds)
+                return self._latest_temp_humidity
+
+        # Try to read from ROS2 topic using rclpy
+        if RCLPY_AVAILABLE:
+            initialized_here = False
+            node = None
+            try:
+                import rclpy
+                from rclpy.node import Node
+                from threading import Lock
+
+                # We need to import the custom message type.
+                # This works because the service has the correct environment.
+                try:
+                    from thruster_control.msg import TempHumidity
+                except ImportError:
+                    logger.debug("Could not import TempHumidity message type")
+                    return self._latest_temp_humidity
+
+                data_received = []
+                lock = Lock()
+                topic_name = self.temp_humidity_topic
+                node_name = f"temp_humidity_reader_{int(time.time() * 1000)}"
+
+                class TempHumidityReader(Node):
+                    def __init__(self, name: str):
+                        super().__init__(name)
+                        self.subscription = self.create_subscription(
+                            TempHumidity,
+                            topic_name,
+                            self.callback,
+                            10)
+
+                    def callback(self, msg):
+                        with lock:
+                            data_received.append({
+                                'temp1': msg.temp1,
+                                'humidity1': msg.humidity1,
+                                'temp2': msg.temp2,
+                                'humidity2': msg.humidity2,
+                            })
+
+                if not rclpy.ok():
+                    rclpy.init()
+                    initialized_here = True
+
+                node = TempHumidityReader(node_name)
+
+                # Spin briefly to get one message
+                start_time = time.time()
+                while time.time() - start_time < 1.5:
+                    rclpy.spin_once(node, timeout_sec=0.1)
+                    with lock:
+                        if data_received:
+                            data = data_received[0]
+                            break
+                else:
+                    logger.debug("Temp/Humidity topic timeout")
+                    return self._latest_temp_humidity
+
+                if all(v is not None for v in data.values()):
+                    self._latest_temp_humidity = data
+                    self._last_temp_humidity_time = time.time()
+                    logger.debug(f"Temp/Humidity read via rclpy: {data}")
+                    return data
+
+            except Exception as e:
+                logger.debug(f"Temp/Humidity rclpy read error: {e}")
+            finally:
+                try:
+                    if node is not None:
+                        node.destroy_node()
+                except Exception:
+                    pass
+                try:
+                    if initialized_here and RCLPY_AVAILABLE:
+                        import rclpy
+                        if rclpy.ok():
+                            rclpy.shutdown()
+                except Exception:
+                    pass
+
+        # Return cached data
+        return self._latest_temp_humidity
 
     def _get_ros2_monitor(self):
         """Lazy load ROS2 monitor for system status check"""
@@ -265,6 +395,10 @@ class ThrusterDiagnostic(BaseDiagnostic):
         # 4. ROS2 topic check
         topic_result = self._check_topics()
         metrics['topics'] = topic_result['metrics']
+        
+        # Extract temp_humidity to top level for get_diagnostic_summary()
+        if 'temp_humidity' in topic_result['metrics']:
+            metrics['temp_humidity'] = topic_result['metrics']['temp_humidity']
 
         topic_ok = topic_result['metrics'].get('available', False)
 
@@ -425,12 +559,16 @@ class ThrusterDiagnostic(BaseDiagnostic):
             has_thruster_node = len(thruster_nodes) > 0
 
             if has_topic and has_thruster_node:
+                # Read temperature & humidity data
+                temp_humidity = self._read_temp_humidity()
+
                 return {
                     'status': StatusLevel.OK,
                     'metrics': {
                         'status_topic': self.status_topic,
                         'available': True,
                         'thruster_nodes': thruster_nodes,
+                        'temp_humidity': temp_humidity,
                     },
                     'details': {
                         'all_topics': [t for t in topics if 'thruster' in t.lower()],
@@ -443,6 +581,7 @@ class ThrusterDiagnostic(BaseDiagnostic):
                         'status_topic': self.status_topic,
                         'available': True,
                         'thruster_nodes': [],
+                        'temp_humidity': self._latest_temp_humidity,
                     },
                     'details': {'message': 'Topic exists but no thruster node found'}
                 }
@@ -453,6 +592,7 @@ class ThrusterDiagnostic(BaseDiagnostic):
                         'status_topic': self.status_topic,
                         'available': False,
                         'thruster_nodes': thruster_nodes,
+                        'temp_humidity': self._latest_temp_humidity,
                     },
                     'details': {'message': 'Topic not found'}
                 }
@@ -462,6 +602,7 @@ class ThrusterDiagnostic(BaseDiagnostic):
                 'metrics': {
                     'status_topic': self.status_topic,
                     'available': False,
+                    'temp_humidity': self._latest_temp_humidity,
                 },
                 'details': {'error': f'Could not check topics: {e}'}
             }
@@ -521,11 +662,23 @@ class ThrusterDiagnostic(BaseDiagnostic):
         status_str, color = status_map.get(self.last_result.status, ('stopped', 'gray'))
         online = self.last_result.metrics.get('udp', {}).get('online', False)
 
+        # Get temperature & humidity data
+        temp_humidity = self.last_result.metrics.get('temp_humidity', {})
+        temp1 = temp_humidity.get('temp1')
+        hum1 = temp_humidity.get('humidity1')
+
+        # Format value string
+        if temp1 is not None and hum1 is not None:
+            value_str = f"{temp1:.1f}°C / {hum1:.0f}%"
+        else:
+            value_str = 'Online' if online else 'Offline'
+
         return {
             'name': 'Arduino (Thruster)',
             'status': status_str,
             'icon': 'fa-solid fa-microchip',
             'color': color,
-            'value': 'Online' if online else 'Offline',
+            'value': value_str,
             'message': self.last_result.message,
+            'temp_humidity': temp_humidity,
         }
