@@ -961,9 +961,14 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
             'node_available': node_available,
         }
         
-        # Add temperature & humidity data for thruster sensor
-        if sensor_name == 'thruster' and 'temp_humidity' in summary:
-            result['temp_humidity'] = summary['temp_humidity']
+        # Add additional thruster telemetry fields
+        if sensor_name == 'thruster':
+            if 'temp_humidity' in summary:
+                result['temp_humidity'] = summary['temp_humidity']
+            if 'thruster_status' in summary:
+                result['thruster_status'] = summary['thruster_status']
+            if 'flow_data' in summary:
+                result['flow_data'] = summary['flow_data']
         
         return result
     except Exception as e:
@@ -1542,6 +1547,8 @@ def collect_sensor_status() -> Dict[str, Any]:
                 'node_available': node_available,
                 'voltages': summary.get('voltages', {}),
                 'temp_humidity': summary.get('temp_humidity', {}),
+                'thruster_status': summary.get('thruster_status', {}),
+                'flow_data': summary.get('flow_data', {}),
             }
         except Exception as e:
             logger.debug(f"Error collecting {name}: {e}")

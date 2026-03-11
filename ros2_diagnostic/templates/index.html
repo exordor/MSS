@@ -127,6 +127,14 @@
                     </button>
                 </div>
                 <div class="card-body">
+                    <div class="sensor-quick-actions">
+                        <a href="/sensors?sensor=thruster"
+                           class="btn btn-secondary nav-link-new-tab quick-thruster-btn"
+                           data-window="ros2-sensors">
+                            <i class="fa-solid fa-anchor"></i>
+                            Open Thruster Panel
+                        </a>
+                    </div>
                     <table class="sensors-table">
                         <thead>
                             <tr>
@@ -327,6 +335,20 @@ const TIME_REFRESH_INTERVAL = {{ time_refresh_interval or 1000 }};
 /* Sensors Table Styles */
 .sensors-table-card-full {
     grid-column: 1 / -1;
+}
+
+.sensor-quick-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: var(--spacing-sm);
+}
+
+.quick-thruster-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: 0.35rem 0.7rem;
+    font-size: 0.8rem;
 }
 
 .sensors-table {

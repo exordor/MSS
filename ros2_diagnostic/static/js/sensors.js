@@ -14,6 +14,7 @@ let sensorsCache = {};
 
 document.addEventListener('DOMContentLoaded', function() {
     initSensorTabs();
+    activateRequestedSensorTab();
 });
 
 // ==========================================
@@ -43,6 +44,20 @@ function switchSensorTab(sensor) {
 
     currentSensor = sensor;
     // Update will come from WebSocket data
+}
+
+function activateRequestedSensorTab() {
+    const validSensors = new Set(['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery']);
+    const params = new URLSearchParams(window.location.search);
+    let requested = params.get('sensor');
+
+    if (!requested && window.location.hash) {
+        requested = window.location.hash.replace('#', '').replace('Panel', '');
+    }
+
+    if (requested && validSensors.has(requested)) {
+        switchSensorTab(requested);
+    }
 }
 
 // ==========================================
@@ -195,6 +210,71 @@ function updateThrusterPanel(data) {
 
     if (latencyEl && data.packet_loss) {
         latencyEl.textContent = data.packet_loss + ' ms';
+    }
+
+    // Update thruster status (S)
+    const thrusterStatus = data.thruster_status || {};
+    const modeEl = document.getElementById('thrusterMode');
+    const leftPwmEl = document.getElementById('thrusterLeftPwm');
+    const rightPwmEl = document.getElementById('thrusterRightPwm');
+
+    if (modeEl) {
+        if (thrusterStatus.mode !== undefined && thrusterStatus.mode !== null) {
+            const modeLabel = thrusterStatus.mode_label || (thrusterStatus.mode === 1 ? 'WiFi' : (thrusterStatus.mode === 0 ? 'RC' : 'Mode'));
+            modeEl.textContent = `${modeLabel} (${thrusterStatus.mode})`;
+        } else {
+            modeEl.textContent = '--';
+        }
+    }
+    if (leftPwmEl) {
+        if (thrusterStatus.left_pwm !== undefined && thrusterStatus.left_pwm !== null) {
+            leftPwmEl.textContent = thrusterStatus.left_pwm + ' us';
+        } else {
+            leftPwmEl.textContent = '--';
+        }
+    }
+    if (rightPwmEl) {
+        if (thrusterStatus.right_pwm !== undefined && thrusterStatus.right_pwm !== null) {
+            rightPwmEl.textContent = thrusterStatus.right_pwm + ' us';
+        } else {
+            rightPwmEl.textContent = '--';
+        }
+    }
+
+    // Update flow / speed (F)
+    const flowData = data.flow_data || {};
+    const freqEl = document.getElementById('thrusterFreqHz');
+    const flowLminEl = document.getElementById('thrusterFlowLmin');
+    const velocityEl = document.getElementById('thrusterVelocityMs');
+    const totalLitersEl = document.getElementById('thrusterTotalLiters');
+
+    if (freqEl) {
+        if (flowData.freq_hz !== undefined && flowData.freq_hz !== null) {
+            freqEl.textContent = flowData.freq_hz.toFixed(2) + ' Hz';
+        } else {
+            freqEl.textContent = '--';
+        }
+    }
+    if (flowLminEl) {
+        if (flowData.flow_lmin !== undefined && flowData.flow_lmin !== null) {
+            flowLminEl.textContent = flowData.flow_lmin.toFixed(2) + ' L/min';
+        } else {
+            flowLminEl.textContent = '--';
+        }
+    }
+    if (velocityEl) {
+        if (flowData.velocity_ms !== undefined && flowData.velocity_ms !== null) {
+            velocityEl.textContent = flowData.velocity_ms.toFixed(3) + ' m/s';
+        } else {
+            velocityEl.textContent = '--';
+        }
+    }
+    if (totalLitersEl) {
+        if (flowData.total_liters !== undefined && flowData.total_liters !== null) {
+            totalLitersEl.textContent = flowData.total_liters.toFixed(3) + ' L';
+        } else {
+            totalLitersEl.textContent = '--';
+        }
     }
 
     // Update temperature & humidity

@@ -49,6 +49,20 @@ class ThrusterDiagnostic(BaseDiagnostic):
             'humidity2': None,
         }
         self._last_temp_humidity_time = 0
+        self._latest_thruster_status = {
+            'mode': None,
+            'mode_label': None,
+            'left_pwm': None,
+            'right_pwm': None,
+        }
+        self._last_thruster_status_time = 0
+        self._latest_flow_data = {
+            'freq_hz': None,
+            'flow_lmin': None,
+            'velocity_ms': None,
+            'total_liters': None,
+        }
+        self._last_flow_data_time = 0
 
         # UDP timeout (matching driver's udp_timeout parameter)
         self.udp_timeout = thresholds.get('heartbeat_timeout', 5.0)
@@ -158,8 +172,11 @@ class ThrusterDiagnostic(BaseDiagnostic):
                                     # Also track other data (S status, F flow, D temp/humidity)
                                     if data_str and data_str[0] in ['S', 'F', 'D']:
                                         logger.debug(f"Thruster data received: {data_str}")
-                                        # Parse D message for temperature & humidity
-                                        if data_str[0] == 'D':
+                                        if data_str[0] == 'S':
+                                            self._parse_thruster_status(data_str)
+                                        elif data_str[0] == 'F':
+                                            self._parse_flow_data(data_str)
+                                        elif data_str[0] == 'D':
                                             self._parse_temp_humidity(data_str)
 
                     except (socket.error, UnicodeDecodeError) as e:
@@ -198,6 +215,46 @@ class ThrusterDiagnostic(BaseDiagnostic):
                 logger.debug(f"Temp/Humidity parsed: {self._latest_temp_humidity}")
         except (ValueError, IndexError) as e:
             logger.debug(f"Failed to parse temp/humidity: {e}")
+
+    def _parse_thruster_status(self, data_str: str):
+        """Parse thruster status from S message.
+
+        Format: S <mode> <left_pwm> <right_pwm>
+        """
+        try:
+            parts = data_str.split()
+            if len(parts) >= 4 and parts[0] == 'S':
+                mode = int(float(parts[1]))
+                left_pwm = int(float(parts[2]))
+                right_pwm = int(float(parts[3]))
+                mode_label = 'WiFi' if mode == 1 else 'RC' if mode == 0 else f'Mode {mode}'
+                self._latest_thruster_status = {
+                    'mode': mode,
+                    'mode_label': mode_label,
+                    'left_pwm': left_pwm,
+                    'right_pwm': right_pwm,
+                }
+                self._last_thruster_status_time = time.time()
+        except (ValueError, IndexError) as e:
+            logger.debug(f"Failed to parse thruster status: {e}")
+
+    def _parse_flow_data(self, data_str: str):
+        """Parse flow/speed data from F message.
+
+        Format: F <freq_hz> <flow_lmin> <velocity_ms> <total_liters>
+        """
+        try:
+            parts = data_str.split()
+            if len(parts) >= 5 and parts[0] == 'F':
+                self._latest_flow_data = {
+                    'freq_hz': float(parts[1]),
+                    'flow_lmin': float(parts[2]),
+                    'velocity_ms': float(parts[3]),
+                    'total_liters': float(parts[4]),
+                }
+                self._last_flow_data_time = time.time()
+        except (ValueError, IndexError) as e:
+            logger.debug(f"Failed to parse flow data: {e}")
 
     def _read_temp_humidity(self) -> Dict[str, Optional[float]]:
         """Read latest temperature & humidity data from ROS2 topic
@@ -369,6 +426,9 @@ class ThrusterDiagnostic(BaseDiagnostic):
         udp_result = self._check_udp_heartbeat()
         metrics['udp'] = udp_result
         details['udp'] = udp_result
+        metrics['temp_humidity'] = self._latest_temp_humidity
+        metrics['thruster_status'] = self._latest_thruster_status
+        metrics['flow_data'] = self._latest_flow_data
 
         heartbeat_ok = udp_result.get('online', False)
         time_since_last = udp_result.get('time_since_last', 0)
@@ -569,6 +629,8 @@ class ThrusterDiagnostic(BaseDiagnostic):
                         'available': True,
                         'thruster_nodes': thruster_nodes,
                         'temp_humidity': temp_humidity,
+                        'thruster_status': self._latest_thruster_status,
+                        'flow_data': self._latest_flow_data,
                     },
                     'details': {
                         'all_topics': [t for t in topics if 'thruster' in t.lower()],
@@ -582,6 +644,8 @@ class ThrusterDiagnostic(BaseDiagnostic):
                         'available': True,
                         'thruster_nodes': [],
                         'temp_humidity': self._latest_temp_humidity,
+                        'thruster_status': self._latest_thruster_status,
+                        'flow_data': self._latest_flow_data,
                     },
                     'details': {'message': 'Topic exists but no thruster node found'}
                 }
@@ -593,6 +657,8 @@ class ThrusterDiagnostic(BaseDiagnostic):
                         'available': False,
                         'thruster_nodes': thruster_nodes,
                         'temp_humidity': self._latest_temp_humidity,
+                        'thruster_status': self._latest_thruster_status,
+                        'flow_data': self._latest_flow_data,
                     },
                     'details': {'message': 'Topic not found'}
                 }
@@ -603,6 +669,8 @@ class ThrusterDiagnostic(BaseDiagnostic):
                     'status_topic': self.status_topic,
                     'available': False,
                     'temp_humidity': self._latest_temp_humidity,
+                    'thruster_status': self._latest_thruster_status,
+                    'flow_data': self._latest_flow_data,
                 },
                 'details': {'error': f'Could not check topics: {e}'}
             }
@@ -666,6 +734,8 @@ class ThrusterDiagnostic(BaseDiagnostic):
         temp_humidity = self.last_result.metrics.get('temp_humidity', {})
         temp1 = temp_humidity.get('temp1')
         hum1 = temp_humidity.get('humidity1')
+        thruster_status = self.last_result.metrics.get('thruster_status', {})
+        flow_data = self.last_result.metrics.get('flow_data', {})
 
         # Format value string
         if temp1 is not None and hum1 is not None:
@@ -681,4 +751,6 @@ class ThrusterDiagnostic(BaseDiagnostic):
             'value': value_str,
             'message': self.last_result.message,
             'temp_humidity': temp_humidity,
+            'thruster_status': thruster_status,
+            'flow_data': flow_data,
         }
