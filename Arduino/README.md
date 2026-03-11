@@ -80,9 +80,11 @@ The system uses two separate UDP ports for cleaner protocol separation:
 | Direction | Format | Purpose | Rate Limit |
 |-----------|--------|---------|-------------|
 | Client → Arduino | `C <left_us> <right_us>\n` | Thruster command | **20ms min** |
-| Arduino → Client | `S <mode> <left_us> <right_us>\n` | Thruster status | 10 Hz |
-| Arduino → Client | `F <freq_hz> <flow_lmin> <velocity_ms> <total_liters>\n` | Flow data | 5 Hz |
+| Arduino → Client | `S <mode> <left_us> <right_us>\n` | Thruster status (to 28888, 28889) | 10 Hz |
+| Arduino → Client | `F <freq_hz> <flow_lmin> <velocity_ms> <total_liters>\n` | Flow data (to 28888, 28889) | 5 Hz |
 | Arduino → Client | `D <temp1> <hum1> <temp2> <hum2>\n` | DHT data (to 28888, 28889) | 1 Hz |
+
+> **Note**: All data messages (S, F, D) are sent to both port 28888 (Jetson data) and 28889 (Monitor).
 
 #### Heartbeat Port (8889)
 
@@ -245,7 +247,7 @@ Control Priority: UDP > RC > Failsafe
 Flow Meter: D7 polling mode, 1 Hz update rate
 DHT22: D12 and D13, 1 Hz update rate
 UDP: Listen 8888, Send S/F/D to 192.168.50.200:28888
-     DHT also sent to 192.168.50.200:28889 (monitor)
+     S/F/D also sent to 192.168.50.200:28889 (monitor)
      HEARTBEAT broadcast to 192.168.50.255:8889
      HEARTBEAT unicast to 192.168.50.200:28887 (Jetson)
 ```

@@ -16,7 +16,7 @@
  *   - Arduino Listen: Port 8889 (PING heartbeat from Jetson)
  *   - Arduino Send to: 192.168.50.200:28888 (S status, F flow, D dht)
  *   - Arduino Send to: 192.168.50.200:28887 (HEARTBEAT to Jetson, when online)
- *   - Arduino Send to: 192.168.50.200:28889 (D dht, HEARTBEAT to Monitor, when online) [optional]
+ *   - Arduino Send to: 192.168.50.200:28889 (S status, F flow, D dht, HEARTBEAT to Monitor) [optional]
  *   - Arduino Broadcast: 192.168.50.255:8889 (HEARTBEAT broadcast when WiFi connected)
  *   - Command format: C <left_us> <right_us>\n
  *   - Ping format: PING\n (Jetson heartbeat to Arduino on 8889)
@@ -29,7 +29,7 @@
  * Jetson Programs:
  *   - Control node: Sends C commands on 8888, sends PING on 8889,
  *                   receives S/F/D on 28888, HEARTBEAT on 28887
- *   - Monitor node: Receives D on 28889, HEARTBEAT on 28889 (optional)
+ *   - Monitor node: Receives S/F/D on 28889, HEARTBEAT on 28889 (optional)
  *   - Connection detected by timeout: 2s without data = offline
  */
 
@@ -625,7 +625,13 @@ void sendUdpStatus() {
   snprintf(statusBuf, sizeof(statusBuf), "S %d %d %d\n",
            currentMode, currentLeftUs, currentRightUs);
 
+  // Send to Jetson data port (28888)
   udp.beginPacket(JETSON_IP, JETSON_PORT);
+  udp.print(statusBuf);
+  udp.endPacket();
+
+  // Also send to monitor port (28889)
+  udp.beginPacket(JETSON_IP, MONITOR_HEARTBEAT_PORT);
   udp.print(statusBuf);
   udp.endPacket();
 }
@@ -653,7 +659,13 @@ void sendUdpFlowData() {
   snprintf(flowBuf, sizeof(flowBuf), "F %.2f %.2f %.4f %.3f\n",
            flowFreqHz, flowLmin, flowVelocity, totalLiters);
 
+  // Send to Jetson data port (28888)
   udp.beginPacket(JETSON_IP, JETSON_PORT);
+  udp.print(flowBuf);
+  udp.endPacket();
+
+  // Also send to monitor port (28889)
+  udp.beginPacket(JETSON_IP, MONITOR_HEARTBEAT_PORT);
   udp.print(flowBuf);
   udp.endPacket();
 }
@@ -1048,7 +1060,7 @@ void setup() {
   Serial.println("Flow Meter: D7 polling mode, 1 Hz update rate");
   Serial.println("DHT22: D12 and D13, 1 Hz update rate");
   Serial.println("UDP: Listen 8888, Send S/F/D to 192.168.50.200:28888");
-  Serial.println("     DHT also sent to 192.168.50.200:28889 (monitor)");
+  Serial.println("     S/F/D also sent to 192.168.50.200:28889 (monitor)");
   Serial.println("     HEARTBEAT broadcast to 192.168.50.255:8889");
   Serial.println("     HEARTBEAT unicast to 192.168.50.200:28887 (Jetson)");
   Serial.println();
