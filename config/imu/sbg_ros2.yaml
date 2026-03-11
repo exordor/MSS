@@ -326,7 +326,7 @@
 
     nmea:
       # Should ros driver publish NMEA string
-      publish: false
+      publish: true
       # Topic on which to publish nmea data
       topic_name: nmea
       # Namespace where to publish topic

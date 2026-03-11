@@ -17,6 +17,7 @@ topics:
   - /sbg/imu_data
   - /sbg/status
   - /sbg/utc_time
+  - /sbg/gps_raw
   - /thruster_command_pwm
   - /thruster_status_pwm
   - /speed_data
