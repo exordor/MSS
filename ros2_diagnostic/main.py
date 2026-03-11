@@ -768,6 +768,7 @@ def get_monitor(name: str):
                     'SENSOR_THRESHOLDS': SENSOR_THRESHOLDS,
                     'SENSOR_IPS': SENSOR_IPS,
                     'ROS2_TOPICS': ROS2_TOPICS,
+                    'ROS2_CONFIG': ROS2_CONFIG,
                     'ENABLE_TOPIC_DETAILS': ENABLE_TOPIC_DETAILS,
                     'SENSOR_I2C': SENSOR_I2C,
                 })
@@ -936,7 +937,7 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
                     'uli_lidar': 'U-LiDAR',
                     'camera': 'Camera',
                     'imu': 'IMU',
-                    'thruster': 'Arduino (Thruster)',
+                    'thruster': 'Arduino',
                 }
                 display_name = sensor_display_names.get(sensor_name, sensor_name)
                 if 'connected' in summary['status']:
@@ -969,7 +970,12 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
                 result['thruster_status'] = summary['thruster_status']
             if 'flow_data' in summary:
                 result['flow_data'] = summary['flow_data']
-        
+            if 'data_updated_at' in summary:
+                result['data_updated_at'] = summary['data_updated_at']
+        elif sensor_name == 'battery':
+            if 'voltages' in summary:
+                result['voltages'] = summary['voltages']
+
         return result
     except Exception as e:
         logger.debug(f"Error checking {sensor_name}: {e}")
@@ -1518,7 +1524,7 @@ def collect_sensor_status() -> Dict[str, Any]:
                         'uli_lidar': 'U-LiDAR',
                         'camera': 'Camera',
                         'imu': 'IMU',
-                        'thruster': 'Arduino (Thruster)',
+                        'thruster': 'Arduino',
                         'battery': 'Battery',
                     }
                     display_name = sensor_display_names.get(name, name)
@@ -1549,6 +1555,7 @@ def collect_sensor_status() -> Dict[str, Any]:
                 'temp_humidity': summary.get('temp_humidity', {}),
                 'thruster_status': summary.get('thruster_status', {}),
                 'flow_data': summary.get('flow_data', {}),
+                'data_updated_at': summary.get('data_updated_at'),
             }
         except Exception as e:
             logger.debug(f"Error collecting {name}: {e}")

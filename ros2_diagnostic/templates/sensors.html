@@ -25,7 +25,7 @@
             <i class="fa-solid fa-compass"></i> IMU
         </button>
         <button class="sensor-tab" data-sensor="thruster">
-            <i class="fa-solid fa-anchor"></i> Thruster
+            <i class="fa-solid fa-microchip"></i> Arduino
         </button>
         <button class="sensor-tab" data-sensor="battery">
             <i class="fa-solid fa-battery-half"></i> Battery
@@ -176,12 +176,12 @@
         </div>
     </div>
 
-    <!-- Thruster Panel -->
+    <!-- Arduino Panel -->
     <div class="sensor-panel" id="thrusterPanel">
         <div class="panel-header">
             <div class="panel-title">
-                <i class="fa-solid fa-anchor"></i>
-                <h2>Thruster Controller</h2>
+                <i class="fa-solid fa-microchip"></i>
+                <h2>Arduino Controller</h2>
             </div>
             <span class="status-badge large" id="thrusterStatusBadge">Checking...</span>
         </div>
@@ -207,11 +207,15 @@
                         <span class="info-label">Latency</span>
                         <span class="info-value" id="thrusterLatencyValue">-- ms</span>
                     </div>
+                    <div class="info-row">
+                        <span class="info-label">Data Updated</span>
+                        <span class="info-value" id="thrusterDataUpdatedAt">--</span>
+                    </div>
                 </div>
             </div>
-            <!-- Thruster Status (S) -->
+            <!-- Arduino Status (S) -->
             <div class="panel-section">
-                <h3><i class="fa-solid fa-sliders"></i> Thruster Status (S)</h3>
+                <h3><i class="fa-solid fa-sliders"></i> Arduino Status (S)</h3>
                 <div class="connection-info">
                     <div class="info-row">
                         <span class="info-label">Mode</span>
@@ -290,10 +294,6 @@
                 <h3><i class="fa-solid fa-bolt"></i> Voltage Levels</h3>
                 <div class="connection-info">
                     <div class="info-row">
-                        <span class="info-label">Main Battery (A0)</span>
-                        <span class="info-value" id="batteryMainVoltage">--</span>
-                    </div>
-                    <div class="info-row">
                         <span class="info-label">Channel A0 (Messtechnik +)</span>
                         <span class="info-value" id="batteryA0">-- V</span>
                     </div>
@@ -308,28 +308,6 @@
                     <div class="info-row">
                         <span class="info-label">Channel A3 (Antrieb -)</span>
                         <span class="info-value" id="batteryA3">-- V</span>
-                    </div>
-                </div>
-            </div>
-            <!-- Threshold Info -->
-            <div class="panel-section">
-                <h3><i class="fa-solid fa-circle-info"></i> Thresholds (4S LiPo)</h3>
-                <div class="connection-info">
-                    <div class="info-row">
-                        <span class="info-label">Critical</span>
-                        <span class="info-value text-danger">&le; 10.5V</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Low</span>
-                        <span class="info-value text-warning">&le; 11.0V</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Normal</span>
-                        <span class="info-value text-success">11.0V - 14.4V</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Overvoltage</span>
-                        <span class="info-value text-warning">&ge; 14.4V</span>
                     </div>
                 </div>
             </div>

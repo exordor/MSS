@@ -9,7 +9,7 @@ const SENSOR_INFO = {
     uli_lidar: { name: 'U-LiDAR', icon: 'fa-satellite-dish', nodePatterns: [] },
     camera: { name: 'Camera', icon: 'fa-camera', nodePatterns: ['camera', 'galaxy', 'gmsl'] },
     imu: { name: 'IMU', icon: 'fa-compass', nodePatterns: ['sbg', 'imu', 'ekf'] },
-    thruster: { name: 'Arduino (Thruster)', icon: 'fa-microchip', nodePatterns: ['thruster', 'pwm', 'motor'] },
+    thruster: { name: 'Arduino', icon: 'fa-microchip', nodePatterns: ['thruster', 'pwm', 'motor'] },
     battery: { name: 'Battery', icon: 'fa-battery-half', nodePatterns: ['battery', 'ads1115'] },
 };
 

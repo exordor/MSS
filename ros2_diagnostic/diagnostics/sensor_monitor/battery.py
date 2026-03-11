@@ -4,12 +4,17 @@ Battery Diagnostic
 Monitors battery voltage health via ADS1115 ADC (I2C)
 """
 
+import glob
 import logging
+import os
+import re
+import shlex
+import sys
 import time
 from datetime import datetime
 from typing import Any, Dict
 
-from ..base import BaseDiagnostic, DiagnosticResult, StatusLevel, get_higher_priority_status
+from ..base import BaseDiagnostic, DiagnosticResult, StatusLevel
 from ..ros2_helper import get_ros2_helper, RCLPY_AVAILABLE
 
 logger = logging.getLogger(__name__)
@@ -30,13 +35,17 @@ class BatteryDiagnostic(BaseDiagnostic):
         self.topics = config.get('ROS2_TOPICS', {}).get('battery', {})
         self.thresholds = config.get('SENSOR_THRESHOLDS', {}).get('battery', {})
         self.i2c_config = config.get('SENSOR_I2C', {}).get('battery', {})
+        self.ros2_config = config.get('ROS2_CONFIG', {})
 
         self.voltage_topic = self.topics.get('voltage', '/battery_voltage')
-
-        # Voltage thresholds
-        self.min_voltage = self.thresholds.get('min_voltage', 10.0)  # Minimum safe voltage
-        self.max_voltage = self.thresholds.get('max_voltage', 14.4)  # Maximum safe voltage
-        self.critical_voltage = self.thresholds.get('critical_voltage', 10.5)  # Critical low voltage
+        self.ros2_domain_id = int(self.ros2_config.get('domain_id', 42))
+        self.ros2_source_cmd = self.ros2_config.get('source_cmd', '/opt/ros/humble/setup.bash')
+        workspace_root = self.ros2_config.get('workspace')
+        self.workspace_setup_cmd = (
+            os.path.join(workspace_root, 'install', 'setup.bash') if workspace_root else None
+        )
+        self._workspace_root = workspace_root
+        self._workspace_python_path_extended = False
 
         self._ros2_monitor = None
         self._log_parser = None
@@ -53,6 +62,9 @@ class BatteryDiagnostic(BaseDiagnostic):
             'channel_a3': None,
         }
         self._last_data_time = 0
+        self._last_read_attempt_time = 0.0
+        self._read_min_interval = float(self.thresholds.get('read_min_interval_sec', 2.0))
+        self._data_fresh_window = float(self.thresholds.get('data_fresh_window_sec', 5.0))
 
         # Track previous physical connection state (I2C) for alerts
         self._was_connected = True  # Assume connected on startup
@@ -61,6 +73,31 @@ class BatteryDiagnostic(BaseDiagnostic):
         self.i2c_bus = self._parse_i2c_value(self.i2c_config.get('bus', 1), default=1)
         self.i2c_addr = self._parse_i2c_value(self.i2c_config.get('addr', 0x48), default=0x48)
         self.i2c_probe_reg = self._parse_i2c_value(self.i2c_config.get('probe_reg', 0x01), default=0x01)
+
+    @staticmethod
+    def _has_valid_voltage_data(voltages: Dict[str, Any]) -> bool:
+        """Return True if at least one channel has a numeric value."""
+        return any(value is not None for value in voltages.values())
+
+    def _ensure_workspace_python_path(self):
+        """Add workspace site-packages to sys.path for custom ROS message imports."""
+        if self._workspace_python_path_extended or not self._workspace_root:
+            return
+
+        patterns = [
+            os.path.join(self._workspace_root, 'install', 'lib', 'python*', 'site-packages'),
+            os.path.join(self._workspace_root, 'install', 'lib', 'python*', 'dist-packages'),
+            os.path.join(self._workspace_root, 'install', '*', 'lib', 'python*', 'site-packages'),
+            os.path.join(self._workspace_root, 'install', '*', 'lib', 'python*', 'dist-packages'),
+            os.path.join(self._workspace_root, 'install', '*', 'local', 'lib', 'python*', 'site-packages'),
+            os.path.join(self._workspace_root, 'install', '*', 'local', 'lib', 'python*', 'dist-packages'),
+        ]
+        for pattern in patterns:
+            for path in sorted(glob.glob(pattern)):
+                if os.path.isdir(path) and path not in sys.path:
+                    sys.path.append(path)
+
+        self._workspace_python_path_extended = True
 
     @staticmethod
     def _parse_i2c_value(value: Any, default: int) -> int:
@@ -160,11 +197,8 @@ class BatteryDiagnostic(BaseDiagnostic):
 
         Status decision flow:
         1. System not running? → STOPPED
-        2. Topic not available? → WARNING
-        3. Voltage below critical? → CRITICAL
-        4. Voltage below min? → WARNING
-        5. Voltage above max? → WARNING
-        6. Everything normal → OK
+        2. Topic not available or no data? → CONNECTED
+        3. Topic data available → OK
         """
         metrics = {}
         details = {}
@@ -239,7 +273,7 @@ class BatteryDiagnostic(BaseDiagnostic):
         topic_ok = topic_result['metrics'].get('data_available', False)
         voltages = topic_result['metrics'].get('voltages', {})
 
-        # 3. Determine overall status based on voltages
+        # 3. Determine overall status (voltage thresholds disabled)
         if not topic_ok:
             # If I2C is connected, treat as connected regardless of ROS topic data
             if i2c_connected is True:
@@ -253,33 +287,11 @@ class BatteryDiagnostic(BaseDiagnostic):
             if i2c_connected is True and not self._was_connected:
                 self._was_connected = True
 
-            # Check voltage levels
             overall_status = StatusLevel.OK
-            messages = []
-
-            # Check each channel
-            for channel, voltage in voltages.items():
-                if voltage is None:
-                    continue
-
-                if voltage <= self.critical_voltage:
-                    overall_status = get_higher_priority_status(overall_status, StatusLevel.CRITICAL)
-                    messages.append(f"{channel}: {voltage:.2f}V (CRITICAL)")
-                    self._check_and_alert_voltage(channel, voltage, 'critical')
-                elif voltage < self.min_voltage:
-                    overall_status = get_higher_priority_status(overall_status, StatusLevel.WARNING)
-                    messages.append(f"{channel}: {voltage:.2f}V (LOW)")
-                    self._check_and_alert_voltage(channel, voltage, 'warning')
-                elif voltage > self.max_voltage:
-                    overall_status = get_higher_priority_status(overall_status, StatusLevel.WARNING)
-                    messages.append(f"{channel}: {voltage:.2f}V (HIGH)")
-
-            if not messages:
-                # Show all voltages in OK message
-                v_str = ", ".join([f"{k}: {v:.2f}V" for k, v in voltages.items() if v is not None])
-                message = f"Battery - OK ({v_str})"
-            else:
-                message = f"Battery - {', '.join(messages)}"
+            v_str = ", ".join(
+                [f"{k}: {v:.2f}V" for k, v in voltages.items() if v is not None]
+            )
+            message = f"Battery channels ({v_str})" if v_str else "Battery data received"
 
         self.last_check = datetime.now()
         self.check_count += 1
@@ -322,7 +334,7 @@ class BatteryDiagnostic(BaseDiagnostic):
             }
 
         try:
-            helper = get_ros2_helper(42)
+            helper = get_ros2_helper(self.ros2_domain_id)
 
             # Get all nodes
             nodes = helper.get_node_names()
@@ -342,7 +354,9 @@ class BatteryDiagnostic(BaseDiagnostic):
             # Try to read latest data
             voltages = self._read_battery_data()
 
-            if has_topic and has_battery_node and voltages:
+            has_valid_data = self._has_valid_voltage_data(voltages)
+
+            if has_topic and has_battery_node and has_valid_data:
                 return {
                     'status': StatusLevel.OK,
                     'metrics': {
@@ -360,11 +374,14 @@ class BatteryDiagnostic(BaseDiagnostic):
                     'status': StatusLevel.WARNING,
                     'metrics': {
                         'voltage_topic': self.voltage_topic,
-                        'data_available': True,
-                        'battery_nodes': [],
-                        'voltages': self._latest_voltages,
+                        'data_available': has_valid_data,
+                        'battery_nodes': battery_nodes,
+                        'voltages': voltages,
                     },
-                    'details': {'message': 'Topic exists but no battery node found'}
+                    'details': {
+                        'message': 'Topic exists but no battery node found'
+                        if not has_battery_node else 'Topic exists but no battery data received'
+                    }
                 }
             else:
                 return {
@@ -397,26 +414,114 @@ class BatteryDiagnostic(BaseDiagnostic):
         Returns:
             Dict with channel voltages or cached data
         """
+        now = time.time()
+        # Keep UI responsive: if cache is fresh, avoid expensive CLI calls.
+        if self._last_data_time > 0 and (now - self._last_data_time) < self._data_fresh_window:
+            return dict(self._latest_voltages)
+        # Throttle repeated read attempts when data is missing/stale.
+        if (now - self._last_read_attempt_time) < self._read_min_interval:
+            return dict(self._latest_voltages)
+        self._last_read_attempt_time = now
+
+        # Preferred path: direct ROS2 subscription to battery topic.
+        if RCLPY_AVAILABLE:
+            initialized_here = False
+            node = None
+            try:
+                import rclpy
+                from rclpy.node import Node
+                from threading import Lock
+
+                self._ensure_workspace_python_path()
+                try:
+                    from battery_monitor.msg import BatteryVoltage
+                except ImportError:
+                    BatteryVoltage = None
+
+                if BatteryVoltage is not None:
+                    topic_name = self.voltage_topic
+                    data_received = []
+                    lock = Lock()
+
+                    class BatteryReader(Node):
+                        def __init__(self, name: str):
+                            super().__init__(name)
+                            self.subscription = self.create_subscription(
+                                BatteryVoltage,
+                                topic_name,
+                                self.callback,
+                                10
+                            )
+
+                        def callback(self, msg):
+                            with lock:
+                                data_received.append({
+                                    'channel_a0': round(float(msg.channel_a0), 3),
+                                    'channel_a1': round(float(msg.channel_a1), 3),
+                                    'channel_a2': round(float(msg.channel_a2), 3),
+                                    'channel_a3': round(float(msg.channel_a3), 3),
+                                })
+
+                    if not rclpy.ok():
+                        rclpy.init()
+                        initialized_here = True
+
+                    node = BatteryReader(f"battery_reader_{int(time.time() * 1000)}")
+                    start_time = time.time()
+                    while time.time() - start_time < 1.2:
+                        rclpy.spin_once(node, timeout_sec=0.1)
+                        with lock:
+                            if data_received:
+                                updated = dict(self._latest_voltages)
+                                updated.update(data_received[0])
+                                self._latest_voltages = updated
+                                self._last_data_time = time.time()
+                                return dict(self._latest_voltages)
+            except Exception as e:
+                logger.debug(f"Battery rclpy subscription read error: {e}")
+            finally:
+                try:
+                    if node is not None:
+                        node.destroy_node()
+                except Exception:
+                    pass
+                try:
+                    if initialized_here and RCLPY_AVAILABLE:
+                        import rclpy
+                        if rclpy.ok():
+                            rclpy.shutdown()
+                except Exception:
+                    pass
+
         try:
             import subprocess
-            import json
-            import re
 
-            # Use ros2 topic echo with once flag to get latest message
-            # This avoids needing to import custom message types
-            env = {
-                'ROS_DOMAIN_ID': '42',
-                'AMENT_PREFIX_PATH': '/opt/ros/humble',
-                'PATH': '/opt/ros/humble/bin:/usr/bin:/bin'
-            }
-
+            # First try direct CLI with current process env (fast path).
+            direct_env = dict(os.environ)
+            direct_env['ROS_DOMAIN_ID'] = str(self.ros2_domain_id)
             result = subprocess.run(
                 ['ros2', 'topic', 'echo', '--once', self.voltage_topic],
                 capture_output=True,
                 text=True,
-                timeout=3,
-                env=env
+                timeout=1.5,
+                env=direct_env,
             )
+
+            # Fallback: source ROS2 + workspace overlay for custom message resolution.
+            if result.returncode != 0 or not result.stdout.strip():
+                setup_cmds = []
+                if self.ros2_source_cmd and os.path.exists(self.ros2_source_cmd):
+                    setup_cmds.append(f"source {shlex.quote(self.ros2_source_cmd)}")
+                if self.workspace_setup_cmd and os.path.exists(self.workspace_setup_cmd):
+                    setup_cmds.append(f"source {shlex.quote(self.workspace_setup_cmd)}")
+                setup_cmds.append(f"export ROS_DOMAIN_ID={shlex.quote(str(self.ros2_domain_id))}")
+                setup_cmds.append(f"ros2 topic echo --once {shlex.quote(self.voltage_topic)}")
+                result = subprocess.run(
+                    ['bash', '-lc', ' && '.join(setup_cmds)],
+                    capture_output=True,
+                    text=True,
+                    timeout=3.5,
+                )
 
             if result.returncode == 0 and result.stdout:
                 # Parse the output to extract voltage values
@@ -424,8 +529,11 @@ class BatteryDiagnostic(BaseDiagnostic):
                 voltages = {}
                 for line in result.stdout.split('\n'):
                     line = line.strip()
-                    # Match pattern like "channel_a0: 12.34" or "channel_a0: 12.345"
-                    match = re.match(r'(channel_a[0-3]):\s*([\d.]+)', line)
+                    # Match signed float/scientific forms, e.g. -0.123, 1.2e-3.
+                    match = re.search(
+                        r'(channel_a[0-3]):\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)',
+                        line
+                    )
                     if match:
                         channel = match.group(1)
                         try:
@@ -435,50 +543,23 @@ class BatteryDiagnostic(BaseDiagnostic):
                             pass
 
                 if voltages:
-                    self._latest_voltages = voltages
+                    updated = dict(self._latest_voltages)
+                    updated.update(voltages)
+                    self._latest_voltages = updated
                     self._last_data_time = time.time()
-                    logger.debug(f"Battery voltages read via shell: {voltages}")
-                    return voltages
+                    logger.debug(f"Battery voltages read via shell: {self._latest_voltages}")
+                    return dict(self._latest_voltages)
 
             # Topic echo failed, return cached data
             logger.debug(f"Battery topic echo returned no data, using cache")
-            return self._latest_voltages
+            return dict(self._latest_voltages)
 
         except subprocess.TimeoutExpired:
             logger.debug("Battery topic read timeout")
-            return self._latest_voltages
+            return dict(self._latest_voltages)
         except Exception as e:
             logger.debug(f"Battery data read error: {e}")
-            return self._latest_voltages
-
-    def _check_and_alert_voltage(self, channel: str, voltage: float, level: str):
-        """Check and record voltage alert if needed
-
-        Args:
-            channel: Channel name (e.g., 'channel_a0')
-            voltage: Current voltage reading
-            level: Alert level ('critical' or 'warning')
-        """
-        current_time = time.time()
-        alert_key = f"{level}_voltage_{channel}"
-
-        if current_time - self._last_alert_time.get(alert_key, 0) > self._alert_cooldown:
-            threshold = self.critical_voltage if level == 'critical' else self.min_voltage
-            severity = 'critical' if level == 'critical' else 'warning'
-
-            self._record_alert(
-                alert_type=f"{level}_voltage",
-                severity=severity,
-                message=f'Battery {channel}: {voltage:.2f}V (threshold: {threshold:.2f}V)',
-                metric_value=voltage,
-                threshold=threshold,
-                metadata={
-                    'channel': channel,
-                    'voltage': voltage,
-                    'all_voltages': self._latest_voltages
-                }
-            )
-            self._last_alert_time[alert_key] = current_time
+            return dict(self._latest_voltages)
 
     def _record_alert(self, alert_type: str, severity: str, message: str,
                       metric_value: float, threshold: float, metadata: dict):
@@ -543,7 +624,7 @@ class BatteryDiagnostic(BaseDiagnostic):
             'status': status_str,
             'icon': 'fa-solid fa-battery-half',
             'color': color,
-            'value': f"{main_voltage:.2f}V" if main_voltage else "N/A",
+            'value': f"{main_voltage:.2f}V" if main_voltage is not None else "N/A",
             'message': self.last_result.message,
             'voltages': voltages,
         }

@@ -708,14 +708,30 @@ class ThrusterDiagnostic(BaseDiagnostic):
         except Exception as e:
             logger.error(f"Failed to record Thruster alert: {e}")
 
+    def _get_data_updated_at(self) -> Optional[str]:
+        """Get ISO timestamp of the latest telemetry update from Arduino."""
+        with self._udp_lock:
+            last_udp_receive = self._last_udp_receive
+
+        latest_timestamp = max(
+            last_udp_receive,
+            self._last_temp_humidity_time,
+            self._last_thruster_status_time,
+            self._last_flow_data_time,
+        )
+        if latest_timestamp <= 0:
+            return None
+        return datetime.fromtimestamp(latest_timestamp).isoformat()
+
     def get_diagnostic_summary(self) -> Dict[str, Any]:
         """Get summary for dashboard display"""
         if self.last_result is None:
             return {
-                'name': 'Arduino (Thruster)',
+                'name': 'Arduino',
                 'status': 'stopped',
                 'icon': 'fa-solid fa-microchip',
                 'color': 'gray',
+                'data_updated_at': None,
             }
 
         status_map = {
@@ -736,6 +752,7 @@ class ThrusterDiagnostic(BaseDiagnostic):
         hum1 = temp_humidity.get('humidity1')
         thruster_status = self.last_result.metrics.get('thruster_status', {})
         flow_data = self.last_result.metrics.get('flow_data', {})
+        data_updated_at = self._get_data_updated_at()
 
         # Format value string
         if temp1 is not None and hum1 is not None:
@@ -744,7 +761,7 @@ class ThrusterDiagnostic(BaseDiagnostic):
             value_str = 'Online' if online else 'Offline'
 
         return {
-            'name': 'Arduino (Thruster)',
+            'name': 'Arduino',
             'status': status_str,
             'icon': 'fa-solid fa-microchip',
             'color': color,
@@ -753,4 +770,5 @@ class ThrusterDiagnostic(BaseDiagnostic):
             'temp_humidity': temp_humidity,
             'thruster_status': thruster_status,
             'flow_data': flow_data,
+            'data_updated_at': data_updated_at,
         }

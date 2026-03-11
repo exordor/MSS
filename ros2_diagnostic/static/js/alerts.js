@@ -297,7 +297,7 @@ const AlertManager = {
             'uli_lidar': 'U-LiDAR',
             'camera': 'Camera',
             'imu': 'IMU',
-            'thruster': 'Thruster',
+            'thruster': 'Arduino',
             'ptp': 'PTP'
         };
         return names[sensor] || sensor;

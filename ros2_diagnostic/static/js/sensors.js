@@ -212,6 +212,18 @@ function updateThrusterPanel(data) {
         latencyEl.textContent = data.packet_loss + ' ms';
     }
 
+    const dataUpdatedEl = document.getElementById('thrusterDataUpdatedAt');
+    if (dataUpdatedEl) {
+        if (data.data_updated_at) {
+            const parsedTime = new Date(data.data_updated_at);
+            dataUpdatedEl.textContent = Number.isNaN(parsedTime.getTime())
+                ? data.data_updated_at
+                : parsedTime.toLocaleString();
+        } else {
+            dataUpdatedEl.textContent = '--';
+        }
+    }
+
     // Update thruster status (S)
     const thrusterStatus = data.thruster_status || {};
     const modeEl = document.getElementById('thrusterMode');
@@ -314,32 +326,32 @@ function updateBatteryPanel(data) {
     const a2El = document.getElementById('batteryA2');
     const a3El = document.getElementById('batteryA3');
 
-    if (a0El && voltages.channel_a0 !== undefined) {
+    if (a0El && voltages.channel_a0 !== undefined && voltages.channel_a0 !== null) {
         a0El.textContent = voltages.channel_a0.toFixed(2) + ' V';
-        a0El.className = getVoltageClass(voltages.channel_a0);
+        a0El.className = 'info-value';
+    } else if (a0El) {
+        a0El.textContent = '-- V';
+        a0El.className = 'info-value';
     }
-    if (a1El && voltages.channel_a1 !== undefined) {
+    if (a1El && voltages.channel_a1 !== undefined && voltages.channel_a1 !== null) {
         a1El.textContent = voltages.channel_a1.toFixed(2) + ' V';
+        a1El.className = 'info-value';
+    } else if (a1El) {
+        a1El.textContent = '-- V';
+        a1El.className = 'info-value';
     }
-    if (a2El && voltages.channel_a2 !== undefined) {
+    if (a2El && voltages.channel_a2 !== undefined && voltages.channel_a2 !== null) {
         a2El.textContent = voltages.channel_a2.toFixed(2) + ' V';
-        a2El.className = getVoltageClass(voltages.channel_a2);
+        a2El.className = 'info-value';
+    } else if (a2El) {
+        a2El.textContent = '-- V';
+        a2El.className = 'info-value';
     }
-    if (a3El && voltages.channel_a3 !== undefined) {
+    if (a3El && voltages.channel_a3 !== undefined && voltages.channel_a3 !== null) {
         a3El.textContent = voltages.channel_a3.toFixed(2) + ' V';
+        a3El.className = 'info-value';
+    } else if (a3El) {
+        a3El.textContent = '-- V';
+        a3El.className = 'info-value';
     }
-
-    // Update main voltage display
-    const mainVoltageEl = document.getElementById('batteryMainVoltage');
-    if (mainVoltageEl && data.value) {
-        mainVoltageEl.textContent = data.value;
-    }
-}
-
-function getVoltageClass(voltage) {
-    // Returns CSS class based on voltage level (for 4S LiPo)
-    if (voltage < 10.5) return 'text-danger';   // Critical
-    if (voltage < 11.0) return 'text-warning';  // Low
-    if (voltage > 14.4) return 'text-warning';  // Overvoltage
-    return 'text-success';                      // Normal
 }
