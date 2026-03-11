@@ -136,6 +136,7 @@ const unsigned long HEARTBEAT_INTERVAL_MS = 1000;    // Heartbeat send interval 
 const unsigned long WIFI_GRACE_MS = 400;             // Hold-last grace after timeout
 const int DECAY_STEP_US = 5;                         // Soft decay step toward 1500
 const unsigned long STATUS_SEND_INTERVAL_MS = 100;   // Status update rate (10Hz)
+const unsigned long MONITOR_SEND_INTERVAL_MS = 1000;  // Monitor port update rate (1Hz)
 
 // === ESC Configuration ===
 const int RX_VALID_MIN = 950;
@@ -226,6 +227,7 @@ int currentMode = 0;  // 0=RC, 1=WiFi
 
 // Status sending
 unsigned long lastStatusSendMs = 0;
+unsigned long lastMonitorSendMs = 0;
 
 // === Flow Meter State ===
 unsigned long lastFlowCalcMs = 0;     // Last time flow data was calculated
@@ -625,15 +627,12 @@ void sendUdpStatus() {
   snprintf(statusBuf, sizeof(statusBuf), "S %d %d %d\n",
            currentMode, currentLeftUs, currentRightUs);
 
-  // Send to Jetson data port (28888)
+  // Send to Jetson data port (28888) - 10 Hz
   udp.beginPacket(JETSON_IP, JETSON_PORT);
   udp.print(statusBuf);
   udp.endPacket();
 
-  // Also send to monitor port (28889)
-  udp.beginPacket(JETSON_IP, MONITOR_HEARTBEAT_PORT);
-  udp.print(statusBuf);
-  udp.endPacket();
+  // Monitor port sent in sendToMonitorPort()
 }
 
 // Send flow data via UDP to fixed Jetson address
@@ -659,15 +658,12 @@ void sendUdpFlowData() {
   snprintf(flowBuf, sizeof(flowBuf), "F %.2f %.2f %.4f %.3f\n",
            flowFreqHz, flowLmin, flowVelocity, totalLiters);
 
-  // Send to Jetson data port (28888)
+  // Send to Jetson data port (28888) - 5 Hz
   udp.beginPacket(JETSON_IP, JETSON_PORT);
   udp.print(flowBuf);
   udp.endPacket();
 
-  // Also send to monitor port (28889)
-  udp.beginPacket(JETSON_IP, MONITOR_HEARTBEAT_PORT);
-  udp.print(flowBuf);
-  udp.endPacket();
+  // Monitor port sent in sendToMonitorPort()
 }
 
 // Send DHT data via UDP to Jetson
@@ -691,12 +687,50 @@ void sendUdpDhtData() {
   snprintf(dhtBuf, sizeof(dhtBuf), "D %.2f %.2f %.2f %.2f\n",
            dht1Temperature, dht1Humidity, dht2Temperature, dht2Humidity);
 
-  // Send to Jetson data port (28888)
+  // Send to Jetson data port (28888) - 1 Hz
   udp.beginPacket(JETSON_IP, JETSON_PORT);
   udp.print(dhtBuf);
   udp.endPacket();
 
-  // Also send to monitor port (28889)
+  // DHT sent to monitor port in sendToMonitorPort()
+}
+
+// Send all data to monitor port (28889) at 1 Hz
+void sendToMonitorPort() {
+  unsigned long now = millis();
+  if (now - lastMonitorSendMs < MONITOR_SEND_INTERVAL_MS) {
+    return;
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+  if (!isJetsonOnline(now)) {
+    return;
+  }
+
+  lastMonitorSendMs = now;
+
+  // Send status
+  char statusBuf[50];
+  snprintf(statusBuf, sizeof(statusBuf), "S %d %d %d\n",
+           currentMode, currentLeftUs, currentRightUs);
+  udp.beginPacket(JETSON_IP, MONITOR_HEARTBEAT_PORT);
+  udp.print(statusBuf);
+  udp.endPacket();
+
+  // Send flow data
+  char flowBuf[64];
+  snprintf(flowBuf, sizeof(flowBuf), "F %.2f %.2f %.4f %.3f\n",
+           flowFreqHz, flowLmin, flowVelocity, totalLiters);
+  udp.beginPacket(JETSON_IP, MONITOR_HEARTBEAT_PORT);
+  udp.print(flowBuf);
+  udp.endPacket();
+
+  // Send DHT data
+  char dhtBuf[48];
+  snprintf(dhtBuf, sizeof(dhtBuf), "D %.2f %.2f %.2f %.2f\n",
+           dht1Temperature, dht1Humidity, dht2Temperature, dht2Humidity);
   udp.beginPacket(JETSON_IP, MONITOR_HEARTBEAT_PORT);
   udp.print(dhtBuf);
   udp.endPacket();
