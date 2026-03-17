@@ -1,5 +1,5 @@
 #include <WiFiS3.h>
-#include <Servo.h>
+#include "pwm.h"
 #include <WiFiUdp.h>
 #include "DHT.h"
 
@@ -122,6 +122,7 @@ const unsigned long FLOW_CALC_INTERVAL_MS = 1000;    // Flow calculation window 
 const unsigned long FLOW_SEND_INTERVAL_MS = 200;      // Flow UDP send rate (5 Hz)
 
 // === DHT22 Configuration ===
+const bool ENABLE_DHT_SENSORS = true;                     // Safe with hardware PWM ESC output on UNO R4
 const byte DHT_PIN_1 = 12;                             // D12 for DHT22 #1 data
 const byte DHT_PIN_2 = 13;                             // D13 for DHT22 #2 data
 #define DHT_TYPE DHT22
@@ -131,6 +132,9 @@ const unsigned long DHT_SEND_INTERVAL_MS = 1000;       // 1 Hz UDP send rate
 // === Timing Constants ===
 // Debug level: 0=Minimal (errors only), 1=Basic (sensors+status), 2=Verbose (all UDP)
 #define DEBUG_LEVEL 1
+const bool PWM_DEBUG_ENABLED = false;               // Dedicated PWM debug stream for RC/WiFi/ESC investigation
+const unsigned long PWM_DEBUG_INTERVAL_MS = 100;   // 10 Hz so brief twitches are still visible on Serial
+const bool PWM_EVENT_DEBUG_ENABLED = true;         // Print immediately when commanded ESC output changes
 
 const unsigned long RC_FAILSAFE_MS = 200;            // RC signal timeout
 const unsigned long UDP_TIMEOUT_MS = 2000;           // UDP timeout (2s without data = offline)
@@ -147,23 +151,38 @@ const int RX_VALID_MAX = 2000;
 const int ESC_MIN = 1100;
 const int ESC_MID = 1500;
 const int ESC_MAX = 1900;
+const unsigned long ESC_PWM_PERIOD_US = 20000;           // 50 Hz ESC update period
+const unsigned long ESC_SAFE_BOOT_NEUTRAL_MS = 5000; // Hold neutral immediately on boot before any slow init
 const int DEADBAND_US = 40;  // Increased deadband to resist joystick drift (±40µs around center)
+const int RC_EXIT_NEUTRAL_DEADBAND_US = 70;   // Must move this far from 1500 before RC can leave neutral
+const int RC_RETURN_NEUTRAL_DEADBAND_US = 45; // Return-to-neutral hysteresis for RC input
+const int ESC_NEUTRAL_SNAP_US = 12;           // Clamp tiny residual output changes back to exact neutral
+const byte RC_OFFCENTER_CONFIRM_FRAMES = 2;   // Require consecutive off-center RC frames before motion
 
-// === Servo Objects ===
-Servo escL, escR;
+// === ESC PWM Outputs ===
+PwmOut escL(ESC_LEFT_OUT);
+PwmOut escR(ESC_RIGHT_OUT);
+bool escPwmInitialized = false;
 
 // === RC State Variables ===
 // RC state - interrupt-based capture
 volatile unsigned long rRiseMicros = 0, rPulseMicros = 0;
 volatile unsigned long lRiseMicros = 0, lPulseMicros = 0;
+volatile unsigned long rPulseCapturedAtUs = 0;
+volatile unsigned long lPulseCapturedAtUs = 0;
 unsigned long lastRcUpdateL = 0;
 unsigned long lastRcUpdateR = 0;
+byte rcOffcenterFramesL = 0;
+byte rcOffcenterFramesR = 0;
+bool rcMotionLatchedL = false;
+bool rcMotionLatchedR = false;
 
 // RC filtering and smoothing (separate from WiFi for different response characteristics)
 int rcAvgL = ESC_MID;
 int rcAvgR = ESC_MID;
 const int RC_FILTER_ALPHA = 25;       // RC filter (25% = smooth, resists joystick drift)
 const int RC_MAX_STEP_US = 15;        // RC ramp limiting (15µs per cycle = smooth RC control)
+const unsigned long RC_SIGNAL_TIMEOUT_US = RC_FAILSAFE_MS * 1000UL;
 
 const int WIFI_FILTER_ALPHA = 100;    // WiFi filter (100% = no filtering, direct control)
 const int WIFI_MAX_STEP_US = 500;     // WiFi ramp limiting (500µs per cycle = aggressive WiFi control for high speeds)
@@ -258,6 +277,13 @@ inline bool isJetsonOnline(unsigned long now) {
   return (lastJetsonPingMs > 0) && (now - lastJetsonPingMs < JETSON_ONLINE_TIMEOUT_MS);
 }
 
+bool initEscPwmOutputs() {
+  bool leftOk = escL.begin(ESC_PWM_PERIOD_US, ESC_MID);
+  bool rightOk = escR.begin(ESC_PWM_PERIOD_US, ESC_MID);
+  escPwmInitialized = leftOk && rightOk;
+  return escPwmInitialized;
+}
+
 // Right channel interrupt handler
 void onRightChange() {
   int level = digitalRead(CH_RIGHT_IN);
@@ -266,9 +292,10 @@ void onRightChange() {
     rRiseMicros = now;
   } else {
     unsigned long width = now - rRiseMicros;
-    // Only accept valid pulse widths (800-2200µs)
-    if (width >= 800 && width <= 2200) {
+    // Only accept real RC PWM pulse widths.
+    if (width >= RX_VALID_MIN && width <= RX_VALID_MAX) {
       rPulseMicros = width;
+      rPulseCapturedAtUs = now;
     }
   }
 }
@@ -281,8 +308,9 @@ void onLeftChange() {
     lRiseMicros = now;
   } else {
     unsigned long width = now - lRiseMicros;
-    if (width >= 800 && width <= 2200) {
+    if (width >= RX_VALID_MIN && width <= RX_VALID_MAX) {
       lPulseMicros = width;
+      lPulseCapturedAtUs = now;
     }
   }
 }
@@ -322,6 +350,146 @@ int mapLinearToEsc(long pulseUs) {
   return (int)mapped;
 }
 
+unsigned long applyRcNeutralHysteresis(unsigned long pulseUs, bool &motionLatched, byte &offcenterFrames) {
+  if (pulseUs == 0) {
+    motionLatched = false;
+    offcenterFrames = 0;
+    return 0;
+  }
+
+  int deltaUs = abs((int)pulseUs - ESC_MID);
+
+  if (motionLatched) {
+    if (deltaUs <= RC_RETURN_NEUTRAL_DEADBAND_US) {
+      motionLatched = false;
+      offcenterFrames = 0;
+      return ESC_MID;
+    }
+    return pulseUs;
+  }
+
+  if (deltaUs <= RC_EXIT_NEUTRAL_DEADBAND_US) {
+    offcenterFrames = 0;
+    return ESC_MID;
+  }
+
+  if (offcenterFrames < RC_OFFCENTER_CONFIRM_FRAMES) {
+    offcenterFrames++;
+  }
+
+  if (offcenterFrames < RC_OFFCENTER_CONFIRM_FRAMES) {
+    return ESC_MID;
+  }
+
+  motionLatched = true;
+  return pulseUs;
+}
+
+int snapEscToNeutral(int pulseUs) {
+  if (abs(pulseUs - ESC_MID) <= ESC_NEUTRAL_SNAP_US) {
+    return ESC_MID;
+  }
+  return constrain(pulseUs, ESC_MIN, ESC_MAX);
+}
+
+void printPwmDebug(unsigned long now) {
+  if (!PWM_DEBUG_ENABLED) {
+    return;
+  }
+
+  static unsigned long lastPwmDebugMs = 0;
+  if (now - lastPwmDebugMs < PWM_DEBUG_INTERVAL_MS) {
+    return;
+  }
+  lastPwmDebugMs = now;
+
+  unsigned long rawR = 0;
+  unsigned long rawL = 0;
+  unsigned long captureRUs = 0;
+  unsigned long captureLUs = 0;
+
+  noInterrupts();
+  rawR = rPulseMicros;
+  rawL = lPulseMicros;
+  captureRUs = rPulseCapturedAtUs;
+  captureLUs = lPulseCapturedAtUs;
+  interrupts();
+
+  bool freshR = (captureRUs > 0) && (micros() - captureRUs <= RC_SIGNAL_TIMEOUT_US);
+  bool freshL = (captureLUs > 0) && (micros() - captureLUs <= RC_SIGNAL_TIMEOUT_US);
+  unsigned long ageRUs = freshR ? (micros() - captureRUs) : 0;
+  unsigned long ageLUs = freshL ? (micros() - captureLUs) : 0;
+
+  Serial.print("[PWM] mode=");
+  Serial.print(currentMode == 1 ? "WiFi" : "RC");
+  Serial.print(" rawL=");
+  Serial.print(rawL);
+  Serial.print(" rawR=");
+  Serial.print(rawR);
+  Serial.print(" freshL=");
+  Serial.print(freshL ? 1 : 0);
+  Serial.print(" freshR=");
+  Serial.print(freshR ? 1 : 0);
+  Serial.print(" ageL_us=");
+  Serial.print(ageLUs);
+  Serial.print(" ageR_us=");
+  Serial.print(ageRUs);
+  Serial.print(" latchL=");
+  Serial.print(rcMotionLatchedL ? 1 : 0);
+  Serial.print(" latchR=");
+  Serial.print(rcMotionLatchedR ? 1 : 0);
+  Serial.print(" rcL=");
+  Serial.print(rcOutL);
+  Serial.print(" rcR=");
+  Serial.print(rcOutR);
+  Serial.print(" wifiL=");
+  Serial.print(wifiOutL);
+  Serial.print(" wifiR=");
+  Serial.print(wifiOutR);
+  Serial.print(" outL=");
+  Serial.print(currentLeftUs);
+  Serial.print(" outR=");
+  Serial.println(currentRightUs);
+}
+
+void printPwmEventDebug() {
+  if (!PWM_EVENT_DEBUG_ENABLED) {
+    return;
+  }
+
+  static bool initialized = false;
+  static int lastOutL = ESC_MID;
+  static int lastOutR = ESC_MID;
+  static int lastMode = 0;
+
+  if (!initialized) {
+    lastOutL = currentLeftUs;
+    lastOutR = currentRightUs;
+    lastMode = currentMode;
+    initialized = true;
+    return;
+  }
+
+  if (currentLeftUs == lastOutL && currentRightUs == lastOutR && currentMode == lastMode) {
+    return;
+  }
+
+  Serial.print("[PWM EVT] mode=");
+  Serial.print(currentMode == 1 ? "WiFi" : "RC");
+  Serial.print(" prevL=");
+  Serial.print(lastOutL);
+  Serial.print(" prevR=");
+  Serial.print(lastOutR);
+  Serial.print(" newL=");
+  Serial.print(currentLeftUs);
+  Serial.print(" newR=");
+  Serial.println(currentRightUs);
+
+  lastOutL = currentLeftUs;
+  lastOutR = currentRightUs;
+  lastMode = currentMode;
+}
+
 // Unified mapping function: select continuous or gear mode based on setting
 int mapToEsc(unsigned long inUs) {
   if (ENABLE_GEAR_MODE) {
@@ -333,16 +501,33 @@ int mapToEsc(unsigned long inUs) {
 
 void readRcInputs() {
   unsigned long now = millis();
+  unsigned long nowUs = micros();
 
   // Read pulse widths from interrupt capture (non-blocking)
   noInterrupts();
   unsigned long inR = rPulseMicros;
   unsigned long inL = lPulseMicros;
+  unsigned long captureRUs = rPulseCapturedAtUs;
+  unsigned long captureLUs = lPulseCapturedAtUs;
   interrupts();
 
-  // Update timestamp if valid
-  if (inR >= RX_VALID_MIN && inR <= RX_VALID_MAX) lastRcUpdateR = now;
-  if (inL >= RX_VALID_MIN && inL <= RX_VALID_MAX) lastRcUpdateL = now;
+  bool rcFreshR = (captureRUs > 0) && (nowUs - captureRUs <= RC_SIGNAL_TIMEOUT_US);
+  bool rcFreshL = (captureLUs > 0) && (nowUs - captureLUs <= RC_SIGNAL_TIMEOUT_US);
+
+  // Only trust pulses that were captured recently; stale widths must not keep RC alive forever.
+  if (rcFreshR && inR >= RX_VALID_MIN && inR <= RX_VALID_MAX) {
+    lastRcUpdateR = now;
+  } else {
+    inR = 0;
+  }
+  if (rcFreshL && inL >= RX_VALID_MIN && inL <= RX_VALID_MAX) {
+    lastRcUpdateL = now;
+  } else {
+    inL = 0;
+  }
+
+  inR = applyRcNeutralHysteresis(inR, rcMotionLatchedR, rcOffcenterFramesR);
+  inL = applyRcNeutralHysteresis(inL, rcMotionLatchedL, rcOffcenterFramesL);
 
   // Map to ESC range (using gear or linear mode)
   int outR = mapToEsc((long)inR);
@@ -417,6 +602,9 @@ void calculateFlowData(unsigned long now) {
 // === DHT22 Functions ===
 
 void readDhtSensor(unsigned long now) {
+  if (!ENABLE_DHT_SENSORS) {
+    return;
+  }
   if (now - lastDhtReadMs < DHT_READ_INTERVAL_MS) {
     return;
   }
@@ -661,6 +849,9 @@ void sendUdpFlowData() {
 
 // Send DHT data via UDP to Jetson
 void sendUdpDhtData() {
+  if (!ENABLE_DHT_SENSORS) {
+    return;
+  }
   unsigned long now = millis();
   if (now - lastDhtSendMs < DHT_SEND_INTERVAL_MS) {
     return;
@@ -779,8 +970,12 @@ void determineControlMode() {
 }
 
 void updateThrusters() {
-  escR.writeMicroseconds(currentRightUs);
-  escL.writeMicroseconds(currentLeftUs);
+  currentRightUs = snapEscToNeutral(currentRightUs);
+  currentLeftUs = snapEscToNeutral(currentLeftUs);
+  if (escPwmInitialized) {
+    escR.pulseWidth_us(currentRightUs);
+    escL.pulseWidth_us(currentLeftUs);
+  }
 }
 
 // === WiFi Multi-Network Management ===
@@ -1025,18 +1220,36 @@ bool connectToWiFi() {
 // === Setup ===
 
 void setup() {
+  // Drive the ESC pins to a valid neutral pulse immediately on boot.
+  // Hardware PWM keeps running even if another library briefly disables interrupts.
+  currentLeftUs = ESC_MID;
+  currentRightUs = ESC_MID;
+  wifiAvgL = ESC_MID;
+  wifiAvgR = ESC_MID;
+  wifiOutL = ESC_MID;
+  wifiOutR = ESC_MID;
+  rcAvgL = ESC_MID;
+  rcAvgR = ESC_MID;
+  rcOutL = ESC_MID;
+  rcOutR = ESC_MID;
+  initEscPwmOutputs();
+  delay(50);
+
   // Initialize Serial
   Serial.begin(115200);
-  delay(2000);
+  delay(200);
 
   Serial.println("\n=== WiFi UDP + RC Thruster Control + Flow Meter + DHT22 ===");
   Serial.print("RC Control Mode: ");
   Serial.println(ENABLE_GEAR_MODE ? "Gear Mode (9 gears, 100µs intervals)" : "Continuous Mode");
+  Serial.print("ESC Output: ");
+  Serial.println(escPwmInitialized ? "Hardware PWM (PwmOut)" : "Hardware PWM init FAILED");
   Serial.println();
 
   // Configure RC input pins
-  pinMode(CH_RIGHT_IN, INPUT);
-  pinMode(CH_LEFT_IN, INPUT);
+  // RC PWM idles low and pulses high, so pulldown is the safest default when the receiver is off.
+  pinMode(CH_RIGHT_IN, INPUT_PULLDOWN);
+  pinMode(CH_LEFT_IN, INPUT_PULLDOWN);
   Serial.println("RC input pins configured");
 
   // Attach interrupts for PWM capture
@@ -1050,11 +1263,21 @@ void setup() {
   Serial.println("Flow meter sensor configured on D7");
 
   // Initialize DHT sensors
-  dht1.begin();
-  dht2.begin();
-  Serial.println("DHT22 sensors configured on D12 and D13");
+  if (ENABLE_DHT_SENSORS) {
+    dht1.begin();
+    dht2.begin();
+    Serial.println("DHT22 sensors configured on D12 and D13");
+  } else {
+    Serial.println("DHT22 sensors disabled to avoid interrupt-related ESC twitching");
+  }
 
-  // Connect to WiFi (try all networks in order)
+  // Keep neutral stable for ESC arming before any long-running init such as WiFi scans.
+  Serial.print("ESCs initialized to neutral (1500 us), holding for ");
+  Serial.print(ESC_SAFE_BOOT_NEUTRAL_MS);
+  Serial.println(" ms");
+  delay(ESC_SAFE_BOOT_NEUTRAL_MS);
+
+  // Connect to WiFi (try all networks in order) only after ESC outputs are stable.
   bool wifiConnected = connectToWiFi();
 
   if (wifiConnected) {
@@ -1072,20 +1295,14 @@ void setup() {
     Serial.println("WiFi unavailable - Running in RC only mode");
   }
 
-  // Initialize ESCs
-  escL.attach(ESC_LEFT_OUT);
-  escR.attach(ESC_RIGHT_OUT);
-
-  // ESC calibration - neutral for 2 seconds
-  escL.writeMicroseconds(ESC_MID);
-  escR.writeMicroseconds(ESC_MID);
-  Serial.println("ESCs initialized to neutral (1500 µs)");
-  delay(2000);
-
   Serial.println("\n=== System Ready ===");
   Serial.println("Control Priority: UDP > RC > Failsafe");
   Serial.println("Flow Meter: D7 polling mode, 1 Hz update rate");
-  Serial.println("DHT22: D12 and D13, 1 Hz update rate");
+  if (ENABLE_DHT_SENSORS) {
+    Serial.println("DHT22: D12 and D13, 1 Hz update rate");
+  } else {
+    Serial.println("DHT22: DISABLED");
+  }
   Serial.println("UDP: Listen 8888, Send S/F/D to 192.168.50.200:28888");
   Serial.println("     S/F/D also sent to 192.168.50.200:28889 (monitor)");
   Serial.println("     HEARTBEAT broadcast to 192.168.50.255:8889");
@@ -1130,6 +1347,10 @@ void loop() {
 
   // 10. Update thrusters (fast)
   updateThrusters();
+
+  // 10.5. Dedicated PWM debug stream for investigating twitching
+  printPwmEventDebug();
+  printPwmDebug(now);
 
   // 11. Send status to Jetson (may block!)
   sendUdpStatus();
@@ -1200,16 +1421,20 @@ void loop() {
       Serial.print("L ");
 
       // DHT data
-      Serial.print("| DHT1:");
-      Serial.print(dht1Temperature, 1);
-      Serial.print("C ");
-      Serial.print(dht1Humidity, 0);
-      Serial.print("% ");
-      Serial.print("DHT2:");
-      Serial.print(dht2Temperature, 1);
-      Serial.print("C ");
-      Serial.print(dht2Humidity, 0);
-      Serial.print("%");
+      if (ENABLE_DHT_SENSORS) {
+        Serial.print("| DHT1:");
+        Serial.print(dht1Temperature, 1);
+        Serial.print("C ");
+        Serial.print(dht1Humidity, 0);
+        Serial.print("% ");
+        Serial.print("DHT2:");
+        Serial.print(dht2Temperature, 1);
+        Serial.print("C ");
+        Serial.print(dht2Humidity, 0);
+        Serial.print("%");
+      } else {
+        Serial.print("| DHT:OFF");
+      }
 
       Serial.println();
     }
