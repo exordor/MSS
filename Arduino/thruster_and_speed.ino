@@ -129,6 +129,9 @@ const unsigned long DHT_READ_INTERVAL_MS = 2500;       // DHT22 max 0.5 Hz
 const unsigned long DHT_SEND_INTERVAL_MS = 1000;       // 1 Hz UDP send rate
 
 // === Timing Constants ===
+// Debug level: 0=Minimal (errors only), 1=Basic (sensors+status), 2=Verbose (all UDP)
+#define DEBUG_LEVEL 1
+
 const unsigned long RC_FAILSAFE_MS = 200;            // RC signal timeout
 const unsigned long UDP_TIMEOUT_MS = 2000;           // UDP timeout (2s without data = offline)
 const unsigned long JETSON_ONLINE_TIMEOUT_MS = 2000; // Jetson online if ping/command seen recently
@@ -227,11 +230,11 @@ int currentMode = 0;  // 0=RC, 1=WiFi
 
 // Status sending
 unsigned long lastStatusSendMs = 0;
-unsigned long lastMonitorSendMs = 0;
+unsigned long lastMonitorSendMs = 0 - MONITOR_SEND_INTERVAL_MS;  // Allow immediate first send
 
 // === Flow Meter State ===
 unsigned long lastFlowCalcMs = 0;     // Last time flow data was calculated
-unsigned long lastFlowSendMs = 0;     // Last time flow data was sent via UDP
+unsigned long lastFlowSendMs = 0 - FLOW_SEND_INTERVAL_MS;  // Allow immediate first send
 int lastFlowState = 0;
 unsigned long flowChangeCount = 0;
 float flowFreqHz = 0.0f;
@@ -246,8 +249,8 @@ float dht1Temperature = 0.0f;    // Celsius (sensor 1, D12)
 float dht1Humidity = 0.0f;       // Percentage (sensor 1, D12)
 float dht2Temperature = 0.0f;    // Celsius (sensor 2, D13)
 float dht2Humidity = 0.0f;       // Percentage (sensor 2, D13)
-unsigned long lastDhtReadMs = 0;
-unsigned long lastDhtSendMs = 0;
+unsigned long lastDhtReadMs = 0 - DHT_READ_INTERVAL_MS;  // Allow immediate first read
+unsigned long lastDhtSendMs = 0 - DHT_SEND_INTERVAL_MS;  // Allow immediate first send
 
 // === Helper Functions ===
 
@@ -381,21 +384,7 @@ inline void pollFlowSensor() {
   }
 }
 
-// Update flow meter by polling D7 for state changes
-void updateFlowMeter() {
-  unsigned long now = millis();
-
-  // Multiple samples for better capture rate
-  for (int i = 0; i < 5; i++) {
-    pollFlowSensor();
-    delayMicroseconds(10);  // 10us delay between reads (total ~50us)
-  }
-
-  // Calculate flow rate at specified interval (1s window for accurate pulse counting)
-  calculateFlowData(now);
-}
-
-// Separate calculation function (called by updateFlowMeter)
+// Calculate flow rate at specified interval (1s window for accurate pulse counting)
 void calculateFlowData(unsigned long now) {
   if (now - lastFlowCalcMs >= FLOW_CALC_INTERVAL_MS) {
     unsigned long dtMs = now - lastFlowCalcMs;
@@ -410,8 +399,7 @@ void calculateFlowData(unsigned long now) {
     flowFreqHz = freqHz;
 
     // Flow rate: Q(L/min) = f(Hz) / 5
-    float flowLmin = freqHz / K_HZ_PER_LMIN;
-    flowLmin = flowLmin;
+    flowLmin = freqHz / K_HZ_PER_LMIN;
 
     // Velocity calculation
     float flow_m3s = (flowLmin * 0.001f) / 60.0f;
@@ -548,10 +536,15 @@ void readUdpCommands() {
             haveWifiCmd = true;
             lastJetsonPingMs = now;
 
-            Serial.print("UDP Command: Left=");
-            Serial.print(wifiOutL);
-            Serial.print(" Right=");
-            Serial.println(wifiOutR);
+            // Debug: Show received command (rate limited to prevent flooding)
+            static unsigned long lastUdpDebugMs = 0;
+            if (DEBUG_LEVEL >= 2 && now - lastUdpDebugMs >= 200) {  // Max 5 Hz output
+              lastUdpDebugMs = now;
+              Serial.print("[UDP CMD] L=");
+              Serial.print(wifiOutL);
+              Serial.print(" R=");
+              Serial.println(wifiOutR);
+            }
           }
         }
       }
@@ -1036,7 +1029,7 @@ void setup() {
   Serial.begin(115200);
   delay(2000);
 
-  Serial.println("\n=== WiFi UDP + RC Thruster Control + Flow Meter ===");
+  Serial.println("\n=== WiFi UDP + RC Thruster Control + Flow Meter + DHT22 ===");
   Serial.print("RC Control Mode: ");
   Serial.println(ENABLE_GEAR_MODE ? "Gear Mode (9 gears, 100µs intervals)" : "Continuous Mode");
   Serial.println();
@@ -1151,6 +1144,9 @@ void loop() {
   readDhtSensor(now);
   sendUdpDhtData();
 
+  // 13.6. Send all data to monitor port (28889) at 1 Hz
+  sendToMonitorPort();
+
   // 14. Final poll before loop restart
   pollFlowSensor();
 
@@ -1171,14 +1167,63 @@ void loop() {
     prevWifiLink = wifiLink;
   }
 
-  // Debug: Print WiFi command age
+  // Debug output (configurable level)
   static unsigned long lastDebugMs = 0;
   if (now - lastDebugMs >= 1000) {  // Print every 1 second
-    unsigned long cmdAge = haveWifiCmd ? (now - lastWifiCmdMs) : 0;
-    Serial.print("WiFi cmd age: ");
-    Serial.print(cmdAge);
-    Serial.print(" ms | Mode: ");
-    Serial.println(currentMode == 1 ? "WiFi" : "RC");
     lastDebugMs = now;
+
+    // DEBUG_LEVEL 0: No periodic output
+    // DEBUG_LEVEL 1: Basic status + sensors
+    // DEBUG_LEVEL 2: Verbose (all info)
+
+    if (DEBUG_LEVEL >= 1) {
+      // Basic: Mode and WiFi status
+      Serial.print("[");
+      Serial.print(currentMode == 1 ? "WiFi" : "RC");
+      Serial.print("] ");
+
+      // WiFi cmd age
+      if (currentMode == 1) {
+        unsigned long cmdAge = haveWifiCmd ? (now - lastWifiCmdMs) : 0;
+        Serial.print("cmd:");
+        Serial.print(cmdAge);
+        Serial.print("ms ");
+      }
+
+      // Flow data
+      Serial.print("| Flow:");
+      Serial.print(flowLmin, 2);
+      Serial.print("L/min ");
+      Serial.print(flowVelocity, 3);
+      Serial.print("m/s ");
+      Serial.print(totalLiters, 2);
+      Serial.print("L ");
+
+      // DHT data
+      Serial.print("| DHT1:");
+      Serial.print(dht1Temperature, 1);
+      Serial.print("C ");
+      Serial.print(dht1Humidity, 0);
+      Serial.print("% ");
+      Serial.print("DHT2:");
+      Serial.print(dht2Temperature, 1);
+      Serial.print("C ");
+      Serial.print(dht2Humidity, 0);
+      Serial.print("%");
+
+      Serial.println();
+    }
+
+    if (DEBUG_LEVEL >= 2) {
+      // Verbose: Additional details
+      Serial.print("  [VERBOSE] ESC L:");
+      Serial.print(currentLeftUs);
+      Serial.print(" R:");
+      Serial.print(currentRightUs);
+      Serial.print(" | Jetson:");
+      Serial.print(isJetsonOnline(now) ? "ON" : "OFF");
+      Serial.print(" | Monitor sent:");
+      Serial.println(now - lastMonitorSendMs < 1100 ? "OK" : "SKIP");
+    }
   }
 }
