@@ -2,7 +2,8 @@ thruster_wifi_node:
   ros__parameters:
     # Network settings
     host: "192.168.50.100"         # Arduino IP address
-    arduino_port: 8888             # Arduino listening port (receives C commands)
+    arduino_cmd_port: 8888         # Arduino UDP command port (receives C commands)
+    arduino_ping_port: 8889        # Arduino UDP ping port (receives PING heartbeat)
     data_port: 28888               # Local port to receive S status and F flow data
     heartbeat_port: 28887          # Local port to receive HEARTBEAT messages
     connect_timeout: 5.0
