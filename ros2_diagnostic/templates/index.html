@@ -151,6 +151,21 @@
                     </table>
                 </div>
             </div>
+            <div class="status-card sensor-preview-card" id="arduinoSummaryCard">
+                <div class="card-header">
+                    <i class="fa-solid fa-microchip card-icon"></i>
+                    <span class="card-title">Sensor Data Preview</span>
+                    <button class="btn-icon-sm" id="refreshArduinoPreviewBtn" onclick="refreshSensors()" title="Refresh sensor preview">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div id="arduinoSummaryPrimary">--</div>
+                    <div class="text-muted" id="arduinoSummarySecondary" style="margin-top: 0.5rem;">--</div>
+                    <div class="text-muted" id="arduinoSummaryBattery" style="margin-top: 0.5rem;">--</div>
+                    <div class="text-muted" id="arduinoSummaryUpdated" style="margin-top: 0.5rem;">--</div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -334,6 +349,10 @@ const TIME_REFRESH_INTERVAL = {{ time_refresh_interval or 1000 }};
 
 /* Sensors Table Styles */
 .sensors-table-card-full {
+    grid-column: 1 / -1;
+}
+
+.sensor-preview-card {
     grid-column: 1 / -1;
 }
 

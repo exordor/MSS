@@ -195,21 +195,62 @@ function updateThrusterPanel(data) {
         badge.textContent = data.status.toUpperCase();
     }
 
-    const tcpStatus = document.getElementById('thrusterTcpStatus');
+    const ipEl = document.getElementById('thrusterIpValue');
+    const protocolEl = document.getElementById('thrusterProtocolValue');
+    const arduinoPortsEl = document.getElementById('thrusterArduinoPortsValue');
+    const jetsonPortsEl = document.getElementById('thrusterJetsonPortsValue');
+    const networkStatus = document.getElementById('thrusterNetworkStatus');
+    const udpStatus = document.getElementById('thrusterUdpStatus');
     const latencyEl = document.getElementById('thrusterLatencyValue');
+    const connectionInfo = data.connection_info || {};
 
-    if (tcpStatus) {
+    if (ipEl) {
+        ipEl.textContent = connectionInfo.ip || '192.168.50.100';
+    }
+    if (protocolEl) {
+        protocolEl.textContent = connectionInfo.protocol || 'UDP';
+    }
+    if (arduinoPortsEl) {
+        const cmdPort = connectionInfo.arduino_cmd_port ?? 8888;
+        const pingPort = connectionInfo.arduino_ping_port ?? 8889;
+        arduinoPortsEl.textContent = `${cmdPort} cmd / ${pingPort} ping`;
+    }
+    if (jetsonPortsEl) {
+        const dataPort = connectionInfo.driver_data_port ?? 28888;
+        const heartbeatPort = connectionInfo.driver_heartbeat_port ?? 28887;
+        const monitorPort = connectionInfo.monitor_port ?? 28889;
+        jetsonPortsEl.textContent = `${dataPort} data / ${heartbeatPort} heartbeat / ${monitorPort} monitor`;
+    }
+
+    if (networkStatus) {
         if (data.connected === 'Connected') {
-            tcpStatus.textContent = 'Connected';
-            tcpStatus.className = 'info-value text-success';
+            networkStatus.textContent = 'Connected';
+            networkStatus.className = 'info-value text-success';
         } else {
-            tcpStatus.textContent = 'Disconnected';
-            tcpStatus.className = 'info-value text-danger';
+            networkStatus.textContent = 'Disconnected';
+            networkStatus.className = 'info-value text-danger';
         }
     }
 
-    if (latencyEl && data.packet_loss) {
-        latencyEl.textContent = data.packet_loss + ' ms';
+    if (udpStatus) {
+        if (connectionInfo.udp_online === true) {
+            udpStatus.textContent = 'Online';
+            udpStatus.className = 'info-value text-success';
+        } else if (connectionInfo.udp_online === false) {
+            udpStatus.textContent = 'Offline';
+            udpStatus.className = 'info-value text-danger';
+        } else {
+            udpStatus.textContent = '--';
+            udpStatus.className = 'info-value';
+        }
+    }
+
+    if (latencyEl) {
+        if (data.latency_ms !== undefined && data.latency_ms !== null) {
+            latencyEl.textContent = Number(data.latency_ms).toFixed(1) + ' ms';
+        } else {
+            latencyEl.textContent = '--';
+        }
     }
 
     const dataUpdatedEl = document.getElementById('thrusterDataUpdatedAt');

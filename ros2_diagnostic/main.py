@@ -860,6 +860,7 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
         metrics = result.metrics or {}
         frequency = None
         packet_loss = None
+        latency_ms = None
         connected = '--'
         gps_fix = None
         satellites = None
@@ -893,11 +894,10 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
             satellites = gps.get('satellites')
             connected = 'Connected' if metrics.get('serial', {}).get('connected') else 'Disconnected'
         elif sensor_name == 'thruster':
-            # Thruster uses UDP heartbeat, stored in 'network' metrics
+            # Arduino uses UDP for commands, ping, and telemetry.
             network = metrics.get('network', {})
-            udp = metrics.get('udp', {})
             connected = 'Connected' if network.get('reachable', False) else 'Disconnected'
-            latency = network.get('latency_ms', 0)
+            latency_ms = network.get('latency_ms')
             packet_loss = network.get('packet_loss', 0)
         elif sensor_name == 'battery':
             i2c = metrics.get('i2c', {})
@@ -955,6 +955,7 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
             'message': final_message,
             'frequency': frequency,
             'packet_loss': packet_loss,
+            'latency_ms': latency_ms,
             'connected': connected,
             'gps_fix': gps_fix,
             'satellites': satellites,
@@ -972,6 +973,8 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
                 result['flow_data'] = summary['flow_data']
             if 'data_updated_at' in summary:
                 result['data_updated_at'] = summary['data_updated_at']
+            if 'connection_info' in summary:
+                result['connection_info'] = summary['connection_info']
         elif sensor_name == 'battery':
             if 'voltages' in summary:
                 result['voltages'] = summary['voltages']
@@ -1458,6 +1461,7 @@ def collect_sensor_status() -> Dict[str, Any]:
             metrics = result.metrics or {}
             frequency = None
             packet_loss = None
+            latency_ms = None
             connected = '--'
             gps_fix = None
             satellites = None
@@ -1491,11 +1495,10 @@ def collect_sensor_status() -> Dict[str, Any]:
                 satellites = gps.get('satellites')
                 connected = 'Connected' if metrics.get('serial', {}).get('connected') else 'Disconnected'
             elif name == 'thruster':
-                # Thruster uses UDP heartbeat, stored in 'network' metrics
+                # Arduino uses UDP for commands, ping, and telemetry.
                 network = metrics.get('network', {})
-                udp = metrics.get('udp', {})
                 connected = 'Connected' if network.get('reachable', False) else 'Disconnected'
-                latency = network.get('latency_ms', 0)
+                latency_ms = network.get('latency_ms')
                 packet_loss = network.get('packet_loss', 0)
             elif name == 'battery':
                 # Battery uses ROS2 topic data
@@ -1546,6 +1549,7 @@ def collect_sensor_status() -> Dict[str, Any]:
                 'message': final_message,
                 'frequency': frequency,
                 'packet_loss': packet_loss,
+                'latency_ms': latency_ms,
                 'connected': connected,
                 'gps_fix': gps_fix,
                 'satellites': satellites,
@@ -1556,6 +1560,7 @@ def collect_sensor_status() -> Dict[str, Any]:
                 'thruster_status': summary.get('thruster_status', {}),
                 'flow_data': summary.get('flow_data', {}),
                 'data_updated_at': summary.get('data_updated_at'),
+                'connection_info': summary.get('connection_info', {}),
             }
         except Exception as e:
             logger.debug(f"Error collecting {name}: {e}")

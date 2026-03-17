@@ -36,6 +36,11 @@ class ThrusterDiagnostic(BaseDiagnostic):
         thresholds = config.get('SENSOR_THRESHOLDS', {}).get('thruster', {})
 
         self.thruster_ip = self.ips.get('thruster', '192.168.50.100')
+        # UDP port layout mirrors Arduino/thruster_and_speed.ino and thruster_wifi_node.cpp.
+        self.arduino_cmd_port = 8888
+        self.arduino_ping_port = 8889
+        self.driver_data_port = 28888
+        self.driver_heartbeat_port = 28887
         # Monitor UDP port (receives HEARTBEAT, S status, F flow, D temp/humidity from Arduino)
         self.monitor_port = 28889
         self.status_topic = self.topics.get('status', '/thruster_status_pwm')
@@ -723,6 +728,26 @@ class ThrusterDiagnostic(BaseDiagnostic):
             return None
         return datetime.fromtimestamp(latest_timestamp).isoformat()
 
+    def _get_connection_info(self) -> Dict[str, Any]:
+        """Return Arduino connection metadata for UI display."""
+        metrics = self.last_result.metrics if self.last_result else {}
+        network = metrics.get('network', {})
+        udp = metrics.get('udp', {})
+        return {
+            'ip': self.thruster_ip,
+            'protocol': 'UDP',
+            'arduino_cmd_port': self.arduino_cmd_port,
+            'arduino_ping_port': self.arduino_ping_port,
+            'driver_data_port': self.driver_data_port,
+            'driver_heartbeat_port': self.driver_heartbeat_port,
+            'monitor_port': self.monitor_port,
+            'network_reachable': network.get('reachable'),
+            'latency_ms': network.get('latency_ms'),
+            'packet_loss_pct': network.get('packet_loss'),
+            'udp_online': udp.get('online'),
+            'udp_timeout': udp.get('timeout', self.udp_timeout),
+        }
+
     def get_diagnostic_summary(self) -> Dict[str, Any]:
         """Get summary for dashboard display"""
         if self.last_result is None:
@@ -732,6 +757,7 @@ class ThrusterDiagnostic(BaseDiagnostic):
                 'icon': 'fa-solid fa-microchip',
                 'color': 'gray',
                 'data_updated_at': None,
+                'connection_info': self._get_connection_info(),
             }
 
         status_map = {
@@ -771,4 +797,5 @@ class ThrusterDiagnostic(BaseDiagnostic):
             'thruster_status': thruster_status,
             'flow_data': flow_data,
             'data_updated_at': data_updated_at,
+            'connection_info': self._get_connection_info(),
         }

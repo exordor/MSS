@@ -134,11 +134,16 @@ function updateTimeDisplay(data) {
 
 async function refreshSensors() {
     const btn = document.getElementById('refreshSensorsBtn');
+    const previewBtn = document.getElementById('refreshArduinoPreviewBtn');
     const originalIcon = btn?.querySelector('i')?.className;
+    const previewOriginalIcon = previewBtn?.querySelector('i')?.className;
 
     // Show spinning animation
     if (btn) {
         btn.querySelector('i').className = 'fa-solid fa-rotate fa-spin';
+    }
+    if (previewBtn) {
+        previewBtn.querySelector('i').className = 'fa-solid fa-rotate fa-spin';
     }
 
     try {
@@ -159,6 +164,9 @@ async function refreshSensors() {
         setTimeout(() => {
             if (btn) {
                 btn.querySelector('i').className = originalIcon || 'fa-solid fa-rotate';
+            }
+            if (previewBtn) {
+                previewBtn.querySelector('i').className = previewOriginalIcon || 'fa-solid fa-rotate';
             }
         }, 500);
     }
@@ -201,6 +209,7 @@ function updateSensorsDisplay(sensorsData) {
     // Update temperature & humidity display in ROS2 Control card
     // Use cached allSensors to ensure temp_humidity persists across partial updates
     updateTempHumidityDisplay(allSensors);
+    updateArduinoSummaryCard(allSensors);
 
     // Track counts
     const counts = { ok: 0, connected: 0, warning: 0, stopped: 0, disconnected: 0, critical: 0 };
@@ -339,6 +348,62 @@ function updateTempHumidityDisplay(sensors) {
         tempHumidityEl.textContent = '--';
         console.log('[TempHumidity] No data, showing --');
     }
+}
+
+function updateArduinoSummaryCard(sensors) {
+    const primaryEl = document.getElementById('arduinoSummaryPrimary');
+    const secondaryEl = document.getElementById('arduinoSummarySecondary');
+    const batteryEl = document.getElementById('arduinoSummaryBattery');
+    const updatedEl = document.getElementById('arduinoSummaryUpdated');
+    if (!primaryEl || !secondaryEl || !batteryEl || !updatedEl) return;
+
+    const arduino = sensors && sensors.thruster;
+    const battery = sensors && sensors.battery;
+    const tempHumidity = arduino && arduino.temp_humidity ? arduino.temp_humidity : {};
+    const statusData = arduino && arduino.thruster_status ? arduino.thruster_status : {};
+    const flowData = arduino && arduino.flow_data ? arduino.flow_data : {};
+    const voltages = battery && battery.voltages ? battery.voltages : {};
+
+    const primaryParts = [];
+    if (tempHumidity.temp1 !== null && tempHumidity.temp1 !== undefined &&
+        tempHumidity.humidity1 !== null && tempHumidity.humidity1 !== undefined) {
+        primaryParts.push(`JetsonBox: ${tempHumidity.temp1.toFixed(1)}°C/${tempHumidity.humidity1.toFixed(0)}%`);
+    }
+    if (tempHumidity.temp2 !== null && tempHumidity.temp2 !== undefined &&
+        tempHumidity.humidity2 !== null && tempHumidity.humidity2 !== undefined) {
+        primaryParts.push(`ArduinoBox: ${tempHumidity.temp2.toFixed(1)}°C/${tempHumidity.humidity2.toFixed(0)}%`);
+    }
+    primaryEl.textContent = primaryParts.length > 0 ? primaryParts.join(' | ') : '--';
+
+    const secondaryParts = [];
+    if (statusData.mode_label) {
+        const leftPwm = statusData.left_pwm !== null && statusData.left_pwm !== undefined ? statusData.left_pwm : '--';
+        const rightPwm = statusData.right_pwm !== null && statusData.right_pwm !== undefined ? statusData.right_pwm : '--';
+        secondaryParts.push(`PWM: ${statusData.mode_label} ${leftPwm}/${rightPwm}`);
+    }
+    if (flowData.velocity_ms !== null && flowData.velocity_ms !== undefined) {
+        secondaryParts.push(`Speed: ${flowData.velocity_ms.toFixed(2)} m/s`);
+    }
+    secondaryEl.textContent = secondaryParts.length > 0 ? secondaryParts.join(' | ') : '--';
+
+    const batteryParts = [];
+    ['channel_a0', 'channel_a1', 'channel_a2', 'channel_a3'].forEach((channel, index) => {
+        const value = voltages[channel];
+        if (value !== null && value !== undefined) {
+            batteryParts.push(`A${index}: ${value.toFixed(2)}V`);
+        }
+    });
+    batteryEl.textContent = batteryParts.length > 0 ? `Battery: ${batteryParts.join(' | ')}` : 'Battery: --';
+
+    updatedEl.textContent = arduino && arduino.data_updated_at
+        ? `Updated: ${formatArduinoTimestamp(arduino.data_updated_at)}`
+        : 'Updated: --';
+}
+
+function formatArduinoTimestamp(timestamp) {
+    const parsed = new Date(timestamp);
+    if (Number.isNaN(parsed.getTime())) return timestamp;
+    return parsed.toLocaleString();
 }
 
 function updateROS2Display(ros2Data, ros2ControlData) {

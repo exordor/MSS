@@ -193,18 +193,30 @@
                 <div class="connection-info">
                     <div class="info-row">
                         <span class="info-label">IP Address</span>
-                        <span class="info-value">192.168.50.100</span>
+                        <span class="info-value" id="thrusterIpValue">192.168.50.100</span>
                     </div>
                     <div class="info-row">
-                        <span class="info-label">Port</span>
-                        <span class="info-value">8888 (TCP)</span>
+                        <span class="info-label">Protocol</span>
+                        <span class="info-value" id="thrusterProtocolValue">UDP</span>
                     </div>
                     <div class="info-row">
-                        <span class="info-label">TCP Status</span>
-                        <span class="info-value" id="thrusterTcpStatus">--</span>
+                        <span class="info-label">Arduino Ports</span>
+                        <span class="info-value" id="thrusterArduinoPortsValue">8888 cmd / 8889 ping</span>
                     </div>
                     <div class="info-row">
-                        <span class="info-label">Latency</span>
+                        <span class="info-label">Jetson Receive</span>
+                        <span class="info-value" id="thrusterJetsonPortsValue">28888 data / 28887 heartbeat / 28889 monitor</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Network Status</span>
+                        <span class="info-value" id="thrusterNetworkStatus">--</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">UDP Telemetry</span>
+                        <span class="info-value" id="thrusterUdpStatus">--</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Ping RTT</span>
                         <span class="info-value" id="thrusterLatencyValue">-- ms</span>
                     </div>
                     <div class="info-row">

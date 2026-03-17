@@ -109,7 +109,6 @@ sensors:
     # Thruster thresholds (propulsion control system)
     thruster:
       heartbeat_timeout: 1.5       # Maximum time between heartbeat messages (seconds)
-      tcp_timeout: 2.0             # TCP connection timeout (seconds)
       max_response_time: 500       # Maximum command response time (milliseconds)
       ping_timeout: 1.0            # Ping timeout (seconds)
       ping_count: 1                # Ping count
@@ -205,7 +204,7 @@ sensor_connections:
   uli_lidar: "network"     # Ethernet (web interface only)
   camera: "network"        # GigE Vision protocol
   imu: "usb"               # Serial-over-USB connection
-  thruster: "network"      # WiFi (TCP)
+  thruster: "network"      # WiFi (UDP)
   battery: "i2c"           # I2C (local ADS1115)
 
 # ------------------------------------------------------------------------------
