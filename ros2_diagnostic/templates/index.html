@@ -116,6 +116,21 @@
             <h2>Sensor Status</h2>
         </div>
         <div class="status-cards">
+            <div class="status-card sensor-preview-card" id="arduinoSummaryCard">
+                <div class="card-header">
+                    <i class="fa-solid fa-microchip card-icon"></i>
+                    <span class="card-title">Sensor Data Preview</span>
+                    <button class="btn-icon-sm" id="refreshArduinoPreviewBtn" onclick="refreshSensors()" title="Refresh sensor preview">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div id="arduinoSummaryPrimary">--</div>
+                    <div class="text-muted" id="arduinoSummarySecondary" style="margin-top: 0.5rem;">--</div>
+                    <div class="text-muted" id="arduinoSummaryBattery" style="margin-top: 0.5rem;">--</div>
+                    <div class="text-muted" id="arduinoSummaryUpdated" style="margin-top: 0.5rem;">--</div>
+                </div>
+            </div>
             <!-- Sensors Status Table Card -->
             <div class="status-card sensors-table-card-full">
                 <div class="card-header">
@@ -149,21 +164,6 @@
                             <tr><td colspan="5" class="loading">Loading...</td></tr>
                         </tbody>
                     </table>
-                </div>
-            </div>
-            <div class="status-card sensor-preview-card" id="arduinoSummaryCard">
-                <div class="card-header">
-                    <i class="fa-solid fa-microchip card-icon"></i>
-                    <span class="card-title">Sensor Data Preview</span>
-                    <button class="btn-icon-sm" id="refreshArduinoPreviewBtn" onclick="refreshSensors()" title="Refresh sensor preview">
-                        <i class="fa-solid fa-rotate"></i>
-                    </button>
-                </div>
-                <div class="card-body">
-                    <div id="arduinoSummaryPrimary">--</div>
-                    <div class="text-muted" id="arduinoSummarySecondary" style="margin-top: 0.5rem;">--</div>
-                    <div class="text-muted" id="arduinoSummaryBattery" style="margin-top: 0.5rem;">--</div>
-                    <div class="text-muted" id="arduinoSummaryUpdated" style="margin-top: 0.5rem;">--</div>
                 </div>
             </div>
         </div>
