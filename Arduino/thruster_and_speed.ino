@@ -1,4 +1,5 @@
 #include <WiFiS3.h>
+#include "Arduino_LED_Matrix.h"
 #include "pwm.h"
 #include <WiFiUdp.h>
 #include "DHT.h"
@@ -81,13 +82,25 @@ WifiNetwork wifiNetworks[MAX_WIFI_NETWORKS] = {
 int currentNetworkIndex = -1;
 
 // WiFi auto-reconnect configuration
-const unsigned long WIFI_CHECK_INTERVAL_MS = 2000;  // Check WiFi every 2 seconds
+const unsigned long WIFI_CHECK_INTERVAL_MS = 250;   // Background WiFi state machine tick
 const unsigned long WIFI_RECONNECT_DELAY_MS = 5000; // Wait 5s before reconnect attempt
-const int MAX_RECONNECT_ATTEMPTS = 3;               // Max reconnect attempts per network
+const int MAX_RECONNECT_ATTEMPTS = 3;               // Max full background scan cycles before pausing
+const unsigned long WIFI_CONNECT_ATTEMPT_TIMEOUT_MS = 10000; // Per-network connection timeout
+const unsigned long WIFI_UDP_START_DELAY_MS = 300;  // Let the network stack settle briefly before binding UDP sockets
+const unsigned long UDP_START_RETRY_INTERVAL_MS = 1000; // Avoid tight begin()/stop() churn if sockets are not ready yet
 unsigned long lastWifiCheckMs = 0;
 unsigned long lastWifiDisconnectMs = 0;
+unsigned long wifiConnectedAtMs = 0;
+unsigned long lastUdpStartAttemptMs = 0;
 int reconnectAttemptCount = 0;
 bool reconnectInProgress = false;
+bool wifiAttemptActive = false;
+unsigned long wifiAttemptStartMs = 0;
+int wifiAttemptNetworkIndex = -1;
+int wifiCycleStartIndex = -1;
+int wifiNetworksTriedThisCycle = 0;
+bool udpServersStarted = false;
+bool cachedWifiConnected = false;
 
 // UDP Configuration
 const unsigned int UDP_PORT = 8888;         // Data port (commands, status, flow)
@@ -144,6 +157,30 @@ const unsigned long WIFI_GRACE_MS = 400;             // Hold-last grace after ti
 const int DECAY_STEP_US = 5;                         // Soft decay step toward 1500
 const unsigned long STATUS_SEND_INTERVAL_MS = 100;   // Status update rate (10Hz)
 const unsigned long MONITOR_SEND_INTERVAL_MS = 1000;  // Monitor port update rate (1Hz)
+const unsigned long MONITOR_PACKET_INTERVAL_MS = (MONITOR_SEND_INTERVAL_MS + 2) / 3; // Stagger S/F/D across loops at ~1 Hz each
+
+// === WiFi LED Matrix Indicator ===
+const unsigned long WIFI_MATRIX_BLINK_INTERVAL_MS = 120;
+uint8_t WIFI_MATRIX_ICON[8][12] = {
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0},
+  {0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0},
+  {0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0},
+  {0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0},
+  {0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+};
+uint8_t WIFI_MATRIX_OFF[8][12] = {
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+};
 
 // === ESC Configuration ===
 const int RX_VALID_MIN = 950;
@@ -152,7 +189,7 @@ const int ESC_MIN = 1100;
 const int ESC_MID = 1500;
 const int ESC_MAX = 1900;
 const unsigned long ESC_PWM_PERIOD_US = 20000;           // 50 Hz ESC update period
-const unsigned long ESC_SAFE_BOOT_NEUTRAL_MS = 5000; // Hold neutral immediately on boot before any slow init
+const unsigned long ESC_SAFE_BOOT_NEUTRAL_MS = 2000; // Hold neutral briefly on boot so ESCs can arm before control starts
 const int DEADBAND_US = 40;  // Increased deadband to resist joystick drift (±40µs around center)
 const int RC_EXIT_NEUTRAL_DEADBAND_US = 70;   // Must move this far from 1500 before RC can leave neutral
 const int RC_RETURN_NEUTRAL_DEADBAND_US = 45; // Return-to-neutral hysteresis for RC input
@@ -162,7 +199,11 @@ const byte RC_OFFCENTER_CONFIRM_FRAMES = 2;   // Require consecutive off-center 
 // === ESC PWM Outputs ===
 PwmOut escL(ESC_LEFT_OUT);
 PwmOut escR(ESC_RIGHT_OUT);
+ArduinoLEDMatrix ledMatrix;
 bool escPwmInitialized = false;
+bool ledMatrixInitialized = false;
+bool wifiMatrixBlinkVisible = false;
+unsigned long lastWifiMatrixBlinkMs = 0;
 
 // === RC State Variables ===
 // RC state - interrupt-based capture
@@ -229,6 +270,22 @@ int wifiOutL = ESC_MID;
 int wifiOutR = ESC_MID;
 bool haveWifiCmd = false;
 
+enum MonitorPacketType : byte {
+  MONITOR_PACKET_STATUS = 0,
+  MONITOR_PACKET_FLOW = 1,
+  MONITOR_PACKET_DHT = 2,
+  MONITOR_PACKET_COUNT = 3
+};
+
+enum UdpSendTask : byte {
+  UDP_SEND_TASK_HEARTBEAT = 0,
+  UDP_SEND_TASK_STATUS = 1,
+  UDP_SEND_TASK_FLOW = 2,
+  UDP_SEND_TASK_DHT = 3,
+  UDP_SEND_TASK_MONITOR = 4,
+  UDP_SEND_TASK_COUNT = 5
+};
+
 // WiFi command buffer
 #define CMD_BUFFER_SIZE 64
 static char cmdBuffer[CMD_BUFFER_SIZE];
@@ -249,7 +306,7 @@ int currentMode = 0;  // 0=RC, 1=WiFi
 
 // Status sending
 unsigned long lastStatusSendMs = 0;
-unsigned long lastMonitorSendMs = 0 - MONITOR_SEND_INTERVAL_MS;  // Allow immediate first send
+unsigned long lastMonitorSendMs = 0 - MONITOR_PACKET_INTERVAL_MS;  // Allow immediate first send
 
 // === Flow Meter State ===
 unsigned long lastFlowCalcMs = 0;     // Last time flow data was calculated
@@ -270,6 +327,8 @@ float dht2Temperature = 0.0f;    // Celsius (sensor 2, D13)
 float dht2Humidity = 0.0f;       // Percentage (sensor 2, D13)
 unsigned long lastDhtReadMs = 0 - DHT_READ_INTERVAL_MS;  // Allow immediate first read
 unsigned long lastDhtSendMs = 0 - DHT_SEND_INTERVAL_MS;  // Allow immediate first send
+byte nextMonitorPacketType = 0;
+byte nextUdpSendTask = 0;
 
 // === Helper Functions ===
 
@@ -490,6 +549,67 @@ void printPwmEventDebug() {
   lastMode = currentMode;
 }
 
+void renderWifiStatusMatrix(bool lit) {
+  if (!ledMatrixInitialized) {
+    return;
+  }
+
+  if (lit) {
+    ledMatrix.renderBitmap(WIFI_MATRIX_ICON, 8, 12);
+  } else {
+    ledMatrix.renderBitmap(WIFI_MATRIX_OFF, 8, 12);
+  }
+}
+
+void updateWifiStatusMatrix(unsigned long now, bool wifiConnected) {
+  if (!ledMatrixInitialized) {
+    return;
+  }
+
+  enum WifiMatrixMode {
+    WIFI_MATRIX_MODE_OFF = 0,
+    WIFI_MATRIX_MODE_BLINK = 1,
+    WIFI_MATRIX_MODE_SOLID = 2
+  };
+  static int lastMode = WIFI_MATRIX_MODE_OFF;
+
+  bool shouldBlink = !wifiConnected &&
+                     countConfiguredWifiNetworks() > 0 &&
+                     (wifiAttemptActive || reconnectInProgress || lastWifiDisconnectMs > 0);
+
+  if (wifiConnected) {
+    if (lastMode != WIFI_MATRIX_MODE_SOLID) {
+      renderWifiStatusMatrix(true);
+      wifiMatrixBlinkVisible = true;
+    }
+    lastMode = WIFI_MATRIX_MODE_SOLID;
+    return;
+  }
+
+  if (!shouldBlink) {
+    if (lastMode != WIFI_MATRIX_MODE_OFF) {
+      renderWifiStatusMatrix(false);
+      wifiMatrixBlinkVisible = false;
+    }
+    lastMode = WIFI_MATRIX_MODE_OFF;
+    return;
+  }
+
+  if (lastMode != WIFI_MATRIX_MODE_BLINK) {
+    wifiMatrixBlinkVisible = true;
+    lastWifiMatrixBlinkMs = now;
+    renderWifiStatusMatrix(true);
+    lastMode = WIFI_MATRIX_MODE_BLINK;
+    return;
+  }
+
+  if (now - lastWifiMatrixBlinkMs >= WIFI_MATRIX_BLINK_INTERVAL_MS) {
+    wifiMatrixBlinkVisible = !wifiMatrixBlinkVisible;
+    lastWifiMatrixBlinkMs = now;
+    renderWifiStatusMatrix(wifiMatrixBlinkVisible);
+  }
+}
+
 // Unified mapping function: select continuous or gear mode based on setting
 int mapToEsc(unsigned long inUs) {
   if (ENABLE_GEAR_MODE) {
@@ -629,37 +749,52 @@ void readDhtSensor(unsigned long now) {
 
 // === UDP Functions ===
 
+void markUdpTransportFailure(const char* context) {
+  Serial.print("UDP transport failed: ");
+  Serial.println(context);
+  stopUdpServers();
+  lastUdpStartAttemptMs = 0;
+}
+
+bool sendUdpPacket(WiFiUDP& socket, const IPAddress& ip, uint16_t port, const char* payload, const char* context) {
+  size_t payloadLen = strlen(payload);
+  if (!socket.beginPacket(ip, port)) {
+    markUdpTransportFailure(context);
+    return false;
+  }
+  if (socket.write((const uint8_t*)payload, payloadLen) != payloadLen) {
+    markUdpTransportFailure(context);
+    return false;
+  }
+  if (!socket.endPacket()) {
+    markUdpTransportFailure(context);
+    return false;
+  }
+  return true;
+}
+
 // Send heartbeat to Jetson (fixed address, unicast)
-void sendHeartbeat() {
-  unsigned long now = millis();
+bool sendHeartbeat(unsigned long now, bool wifiConnected) {
   if (now - lastHeartbeatMs < HEARTBEAT_INTERVAL_MS) {
-    return;
+    return false;
+  }
+  if (!udpServersStarted || !wifiConnected) {
+    return false;
   }
 
-  // Only send if WiFi is connected (non-blocking check)
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
-  }
-  lastHeartbeatMs = now;
-
-  // Broadcast heartbeat so Jetson can detect Arduino without sending first
-  if (ENABLE_HEARTBEAT_BROADCAST) {
-    udpHeartbeat.beginPacket(HEARTBEAT_BROADCAST_IP, HEARTBEAT_PORT);
-    udpHeartbeat.print("HEARTBEAT\n");
-    udpHeartbeat.endPacket();
+  if (ENABLE_HEARTBEAT_BROADCAST &&
+      !sendUdpPacket(udpHeartbeat, HEARTBEAT_BROADCAST_IP, HEARTBEAT_PORT, "HEARTBEAT\n", "heartbeat broadcast")) {
+    return false;
   }
 
   // Send unicast heartbeats only when Jetson is online to avoid blocking
-  if (isJetsonOnline(now)) {
-    udpHeartbeat.beginPacket(JETSON_IP, JETSON_HEARTBEAT_PORT);
-    udpHeartbeat.print("HEARTBEAT\n");
-    udpHeartbeat.endPacket();
-
-    // Optional: Monitor heartbeat (disabled)
-    // udpHeartbeat.beginPacket(JETSON_IP, MONITOR_HEARTBEAT_PORT);
-    // udpHeartbeat.print("HEARTBEAT\n");
-    // udpHeartbeat.endPacket();
+  if (isJetsonOnline(now) &&
+      !sendUdpPacket(udpHeartbeat, JETSON_IP, JETSON_HEARTBEAT_PORT, "HEARTBEAT\n", "heartbeat unicast")) {
+    return false;
   }
+
+  lastHeartbeatMs = now;
+  return true;
 }
 
 // Read UDP commands from Jetson (data port 8888)
@@ -786,22 +921,16 @@ void readHeartbeatPing() {
 }
 
 // Send status via UDP to fixed Jetson address
-void sendUdpStatus() {
-  unsigned long now = millis();
+bool sendUdpStatus(unsigned long now, bool wifiConnected) {
   if (now - lastStatusSendMs < STATUS_SEND_INTERVAL_MS) {
-    return;
+    return false;
   }
-
-  // Only send if WiFi is connected (non-blocking check)
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
+  if (!udpServersStarted || !wifiConnected) {
+    return false;
   }
-  // Avoid blocking sends when Jetson is offline
   if (!isJetsonOnline(now)) {
-    return;
+    return false;
   }
-
-  lastStatusSendMs = now;
 
   // Send status: "S <mode> <left_us> <right_us>\n"
   char statusBuf[50];
@@ -809,30 +938,25 @@ void sendUdpStatus() {
            currentMode, currentLeftUs, currentRightUs);
 
   // Send to Jetson data port (28888) - 10 Hz
-  udp.beginPacket(JETSON_IP, JETSON_PORT);
-  udp.print(statusBuf);
-  udp.endPacket();
+  if (!sendUdpPacket(udp, JETSON_IP, JETSON_PORT, statusBuf, "status")) {
+    return false;
+  }
 
-  // Monitor port sent in sendToMonitorPort()
+  lastStatusSendMs = now;
+  return true;
 }
 
 // Send flow data via UDP to fixed Jetson address
-void sendUdpFlowData() {
-  unsigned long now = millis();
+bool sendUdpFlowData(unsigned long now, bool wifiConnected) {
   if (now - lastFlowSendMs < FLOW_SEND_INTERVAL_MS) {
-    return;
+    return false;
   }
-
-  // Only send if WiFi is connected (non-blocking check)
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
+  if (!udpServersStarted || !wifiConnected) {
+    return false;
   }
-  // Avoid blocking sends when Jetson is offline
   if (!isJetsonOnline(now)) {
-    return;
+    return false;
   }
-
-  lastFlowSendMs = now;
 
   // Send flow data: "F <freq_hz> <flow_lmin> <velocity_ms> <total_liters>\n"
   char flowBuf[64];
@@ -840,31 +964,28 @@ void sendUdpFlowData() {
            flowFreqHz, flowLmin, flowVelocity, totalLiters);
 
   // Send to Jetson data port (28888) - 5 Hz
-  udp.beginPacket(JETSON_IP, JETSON_PORT);
-  udp.print(flowBuf);
-  udp.endPacket();
+  if (!sendUdpPacket(udp, JETSON_IP, JETSON_PORT, flowBuf, "flow")) {
+    return false;
+  }
 
-  // Monitor port sent in sendToMonitorPort()
+  lastFlowSendMs = now;
+  return true;
 }
 
 // Send DHT data via UDP to Jetson
-void sendUdpDhtData() {
+bool sendUdpDhtData(unsigned long now, bool wifiConnected) {
   if (!ENABLE_DHT_SENSORS) {
-    return;
+    return false;
   }
-  unsigned long now = millis();
   if (now - lastDhtSendMs < DHT_SEND_INTERVAL_MS) {
-    return;
+    return false;
   }
-
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
+  if (!udpServersStarted || !wifiConnected) {
+    return false;
   }
   if (!isJetsonOnline(now)) {
-    return;
+    return false;
   }
-
-  lastDhtSendMs = now;
 
   // Send DHT data: "D <temp1> <hum1> <temp2> <hum2>\n"
   char dhtBuf[48];
@@ -872,52 +993,90 @@ void sendUdpDhtData() {
            dht1Temperature, dht1Humidity, dht2Temperature, dht2Humidity);
 
   // Send to Jetson data port (28888) - 1 Hz
-  udp.beginPacket(JETSON_IP, JETSON_PORT);
-  udp.print(dhtBuf);
-  udp.endPacket();
+  if (!sendUdpPacket(udp, JETSON_IP, JETSON_PORT, dhtBuf, "dht")) {
+    return false;
+  }
 
-  // DHT sent to monitor port in sendToMonitorPort()
+  lastDhtSendMs = now;
+  return true;
 }
 
-// Send all data to monitor port (28889) at 1 Hz
-void sendToMonitorPort() {
-  unsigned long now = millis();
-  if (now - lastMonitorSendMs < MONITOR_SEND_INTERVAL_MS) {
-    return;
+// Send monitor packets one-at-a-time so a single loop never bursts three UDP sends back-to-back.
+bool sendToMonitorPort(unsigned long now, bool wifiConnected) {
+  if (now - lastMonitorSendMs < MONITOR_PACKET_INTERVAL_MS) {
+    return false;
   }
-
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
+  if (!udpServersStarted || !wifiConnected) {
+    return false;
   }
   if (!isJetsonOnline(now)) {
-    return;
+    return false;
+  }
+
+  char packetBuf[64];
+  const char* context = "monitor";
+
+  switch (nextMonitorPacketType) {
+    case MONITOR_PACKET_STATUS:
+      snprintf(packetBuf, sizeof(packetBuf), "S %d %d %d\n",
+               currentMode, currentLeftUs, currentRightUs);
+      context = "monitor status";
+      break;
+    case MONITOR_PACKET_FLOW:
+      snprintf(packetBuf, sizeof(packetBuf), "F %.2f %.2f %.4f %.3f\n",
+               flowFreqHz, flowLmin, flowVelocity, totalLiters);
+      context = "monitor flow";
+      break;
+    case MONITOR_PACKET_DHT:
+    default:
+      snprintf(packetBuf, sizeof(packetBuf), "D %.2f %.2f %.2f %.2f\n",
+               dht1Temperature, dht1Humidity, dht2Temperature, dht2Humidity);
+      context = "monitor dht";
+      break;
+  }
+
+  if (!sendUdpPacket(udp, JETSON_IP, MONITOR_HEARTBEAT_PORT, packetBuf, context)) {
+    return false;
   }
 
   lastMonitorSendMs = now;
+  nextMonitorPacketType = (nextMonitorPacketType + 1) % MONITOR_PACKET_COUNT;
+  return true;
+}
 
-  // Send status
-  char statusBuf[50];
-  snprintf(statusBuf, sizeof(statusBuf), "S %d %d %d\n",
-           currentMode, currentLeftUs, currentRightUs);
-  udp.beginPacket(JETSON_IP, MONITOR_HEARTBEAT_PORT);
-  udp.print(statusBuf);
-  udp.endPacket();
+void serviceOneUdpSendTask(unsigned long now, bool wifiConnected) {
+  for (byte offset = 0; offset < UDP_SEND_TASK_COUNT; ++offset) {
+    byte task = (nextUdpSendTask + offset) % UDP_SEND_TASK_COUNT;
+    bool sent = false;
 
-  // Send flow data
-  char flowBuf[64];
-  snprintf(flowBuf, sizeof(flowBuf), "F %.2f %.2f %.4f %.3f\n",
-           flowFreqHz, flowLmin, flowVelocity, totalLiters);
-  udp.beginPacket(JETSON_IP, MONITOR_HEARTBEAT_PORT);
-  udp.print(flowBuf);
-  udp.endPacket();
+    switch (task) {
+      case UDP_SEND_TASK_HEARTBEAT:
+        sent = sendHeartbeat(now, wifiConnected);
+        break;
+      case UDP_SEND_TASK_STATUS:
+        sent = sendUdpStatus(now, wifiConnected);
+        break;
+      case UDP_SEND_TASK_FLOW:
+        sent = sendUdpFlowData(now, wifiConnected);
+        break;
+      case UDP_SEND_TASK_DHT:
+        sent = sendUdpDhtData(now, wifiConnected);
+        break;
+      case UDP_SEND_TASK_MONITOR:
+        sent = sendToMonitorPort(now, wifiConnected);
+        break;
+      default:
+        break;
+    }
 
-  // Send DHT data
-  char dhtBuf[48];
-  snprintf(dhtBuf, sizeof(dhtBuf), "D %.2f %.2f %.2f %.2f\n",
-           dht1Temperature, dht1Humidity, dht2Temperature, dht2Humidity);
-  udp.beginPacket(JETSON_IP, MONITOR_HEARTBEAT_PORT);
-  udp.print(dhtBuf);
-  udp.endPacket();
+    if (sent) {
+      nextUdpSendTask = (task + 1) % UDP_SEND_TASK_COUNT;
+      return;
+    }
+    if (!udpServersStarted) {
+      return;
+    }
+  }
 }
 
 void determineControlMode() {
@@ -980,240 +1139,297 @@ void updateThrusters() {
 
 // === WiFi Multi-Network Management ===
 
-// Try to reconnect to WiFi (attempt previously connected network first)
-bool reconnectWiFi() {
-  unsigned long now = millis();
-
-  // Wait before reconnect attempt
-  if (now - lastWifiDisconnectMs < WIFI_RECONNECT_DELAY_MS) {
-    return false;
-  }
-
-  Serial.println("\n=== WiFi Reconnection Attempt ===");
-
-  // Try to reconnect to the previously connected network first
-  if (currentNetworkIndex >= 0) {
-    Serial.print("Reconnecting to: ");
-    Serial.println(wifiNetworks[currentNetworkIndex].ssid);
-
-    // Configure IP
-    if (!wifiNetworks[currentNetworkIndex].use_dhcp) {
-      WiFi.config(wifiNetworks[currentNetworkIndex].local_ip,
-                  wifiNetworks[currentNetworkIndex].gateway,
-                  wifiNetworks[currentNetworkIndex].subnet);
-    }
-
-    // Disconnect first, then attempt reconnection
-    WiFi.disconnect();
-    delay(100);
-    WiFi.begin(wifiNetworks[currentNetworkIndex].ssid,
-               wifiNetworks[currentNetworkIndex].password);
-
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 10) {
-      delay(500);
-      Serial.print(".");
-      attempts++;
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("\nReconnected!");
-      reconnectAttemptCount = 0;
-      reconnectInProgress = false;
-
-      // Restart UDP servers
-      udp.begin(UDP_PORT);
-      udpHeartbeat.begin(HEARTBEAT_PORT);
-      Serial.print("UDP servers restarted on ports ");
-      Serial.print(UDP_PORT);
-      Serial.print(" (data), ");
-      Serial.println(HEARTBEAT_PORT);
-      Serial.println(" (heartbeat)");
-
-      return true;
-    }
-
-    Serial.println("\nReconnect failed, trying other networks...");
-  }
-
-  // If reconnect to previous network failed, try all networks
-  reconnectAttemptCount++;
-  if (reconnectAttemptCount >= MAX_RECONNECT_ATTEMPTS) {
-    Serial.println("Max reconnect attempts reached. Waiting...");
-    reconnectInProgress = false;
-    reconnectAttemptCount = 0;
-    return false;
-  }
-
-  // Try all networks in order
-  for (int i = 0; i < MAX_WIFI_NETWORKS; i++) {
-    // Skip empty entries
-    if (wifiNetworks[i].ssid == nullptr || strlen(wifiNetworks[i].ssid) == 0) {
-      continue;
-    }
-
-    // Skip the network we just tried to reconnect to
-    if (i == currentNetworkIndex) {
-      continue;
-    }
-
-    Serial.print("Trying network [");
-    Serial.print(i + 1);
-    Serial.print("/");
-    Serial.print(MAX_WIFI_NETWORKS);
-    Serial.print("]: ");
-    Serial.println(wifiNetworks[i].ssid);
-
-    // Configure IP
-    if (!wifiNetworks[i].use_dhcp) {
-      WiFi.config(wifiNetworks[i].local_ip,
-                  wifiNetworks[i].gateway,
-                  wifiNetworks[i].subnet);
-    } else {
-      WiFi.config(IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0));
-    }
-
-    // Attempt connection
-    WiFi.begin(wifiNetworks[i].ssid, wifiNetworks[i].password);
-
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 10) {
-      delay(500);
-      Serial.print(".");
-      attempts++;
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("\nConnected!");
-      Serial.print("  Network: ");
-      Serial.println(wifiNetworks[i].ssid);
-      Serial.print("  IP Address: ");
-      Serial.println(WiFi.localIP());
-      Serial.print("  RSSI: ");
-      Serial.print(WiFi.RSSI());
-      Serial.println(" dBm");
-
-      currentNetworkIndex = i;
-      reconnectAttemptCount = 0;
-      reconnectInProgress = false;
-
-      // Start UDP servers
-      udp.begin(UDP_PORT);
-      udpHeartbeat.begin(HEARTBEAT_PORT);
-      Serial.print("UDP servers started on ports ");
-      Serial.print(UDP_PORT);
-      Serial.print(" (data), ");
-      Serial.println(HEARTBEAT_PORT);
-      Serial.println(" (heartbeat)");
-
-      return true;
-    }
-
-    WiFi.disconnect();
-    delay(500);
-  }
-
-  Serial.println("\nAll networks unavailable");
-  return false;
+bool isWifiNetworkConfigured(int index) {
+  return index >= 0 &&
+         index < MAX_WIFI_NETWORKS &&
+         wifiNetworks[index].ssid != nullptr &&
+         strlen(wifiNetworks[index].ssid) > 0;
 }
 
-// Check WiFi status and trigger reconnection if needed
-void checkWiFiStatus() {
+int countConfiguredWifiNetworks() {
+  int count = 0;
+  for (int i = 0; i < MAX_WIFI_NETWORKS; i++) {
+    if (isWifiNetworkConfigured(i)) {
+      count++;
+    }
+  }
+  return count;
+}
+
+int findFirstConfiguredWifiNetwork() {
+  for (int i = 0; i < MAX_WIFI_NETWORKS; i++) {
+    if (isWifiNetworkConfigured(i)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+int findNextConfiguredWifiNetwork(int startAfter) {
+  for (int offset = 1; offset <= MAX_WIFI_NETWORKS; offset++) {
+    int idx = (startAfter + offset + MAX_WIFI_NETWORKS) % MAX_WIFI_NETWORKS;
+    if (isWifiNetworkConfigured(idx)) {
+      return idx;
+    }
+  }
+  return -1;
+}
+
+void configureWifiForNetwork(int index) {
+  if (!isWifiNetworkConfigured(index)) {
+    return;
+  }
+
+  if (!wifiNetworks[index].use_dhcp) {
+    Serial.print("  Using static IP: ");
+    Serial.println(wifiNetworks[index].local_ip);
+    // WiFiS3 uses config(local_ip, dns_server, gateway, subnet).
+    // Reuse the router IP as DNS so local static-IP links still get a valid gateway.
+    WiFi.config(wifiNetworks[index].local_ip,
+                wifiNetworks[index].gateway,
+                wifiNetworks[index].gateway,
+                wifiNetworks[index].subnet);
+  } else {
+    Serial.println("  Using DHCP");
+    WiFi.config(IPAddress(0, 0, 0, 0));
+  }
+}
+
+void printWifiConnectedInfo(int index) {
+  Serial.println("\nWiFi connected");
+  if (isWifiNetworkConfigured(index)) {
+    Serial.print("  Network: ");
+    Serial.println(wifiNetworks[index].ssid);
+  }
+  Serial.print("  IP Address: ");
+  Serial.println(WiFi.localIP());
+  Serial.print("  Gateway: ");
+  Serial.println(WiFi.gatewayIP());
+  Serial.print("  Subnet: ");
+  Serial.println(WiFi.subnetMask());
+  Serial.print("  RSSI: ");
+  Serial.print(WiFi.RSSI());
+  Serial.println(" dBm");
+}
+
+void stopUdpServers() {
+  udp.stop();
+  udpHeartbeat.stop();
+  udpServersStarted = false;
+}
+
+void ensureUdpServersStarted(unsigned long now, bool wifiConnected) {
+  if (udpServersStarted || !wifiConnected) {
+    return;
+  }
+
+  if (wifiConnectedAtMs == 0) {
+    wifiConnectedAtMs = now;
+  }
+  if (now - wifiConnectedAtMs < WIFI_UDP_START_DELAY_MS) {
+    return;
+  }
+  if (lastUdpStartAttemptMs != 0 && now - lastUdpStartAttemptMs < UDP_START_RETRY_INTERVAL_MS) {
+    return;
+  }
+
+  lastUdpStartAttemptMs = now;
+
+  // WiFiS3 latches a socket handle after begin(); if one port succeeds and the
+  // other fails, we must stop both before retrying or begin() will keep returning 0.
+  stopUdpServers();
+
+  uint8_t dataOk = udp.begin(UDP_PORT);
+  uint8_t heartbeatOk = udpHeartbeat.begin(HEARTBEAT_PORT);
+  if (!dataOk || !heartbeatOk) {
+    stopUdpServers();
+    Serial.print("UDP start failed, retrying: data=");
+    Serial.print((int)dataOk);
+    Serial.print(" heartbeat=");
+    Serial.println((int)heartbeatOk);
+    return;
+  }
+
+  udpServersStarted = true;
+  lastUdpStartAttemptMs = 0;
+
+  Serial.print("Data UDP server started on port ");
+  Serial.println(UDP_PORT);
+  Serial.print("Heartbeat server started on port ");
+  Serial.println(HEARTBEAT_PORT);
+  Serial.println("Ready for UDP control commands");
+}
+
+void resetWifiAttemptState() {
+  wifiAttemptActive = false;
+  wifiAttemptStartMs = 0;
+  wifiAttemptNetworkIndex = -1;
+  wifiCycleStartIndex = -1;
+  wifiNetworksTriedThisCycle = 0;
+}
+
+void startWifiAttempt(int index, unsigned long now) {
+  if (!isWifiNetworkConfigured(index)) {
+    return;
+  }
+
+  int configuredCount = countConfiguredWifiNetworks();
+  wifiAttemptActive = true;
+  wifiAttemptStartMs = now;
+  wifiAttemptNetworkIndex = index;
+
+  Serial.print("WiFi connect attempt [");
+  Serial.print(wifiNetworksTriedThisCycle + 1);
+  Serial.print("/");
+  Serial.print(configuredCount);
+  Serial.print("]: ");
+  Serial.println(wifiNetworks[index].ssid);
+
+  WiFi.disconnect();
+  configureWifiForNetwork(index);
+  WiFi.begin(wifiNetworks[index].ssid, wifiNetworks[index].password);
+}
+
+bool startNextWifiAttempt(unsigned long now) {
+  int configuredCount = countConfiguredWifiNetworks();
+  if (configuredCount == 0 || wifiNetworksTriedThisCycle >= configuredCount) {
+    return false;
+  }
+
+  int nextIndex = wifiAttemptNetworkIndex;
+  if (wifiNetworksTriedThisCycle == 0) {
+    nextIndex = wifiCycleStartIndex;
+  } else {
+    nextIndex = findNextConfiguredWifiNetwork(wifiAttemptNetworkIndex);
+  }
+
+  if (!isWifiNetworkConfigured(nextIndex)) {
+    return false;
+  }
+
+  startWifiAttempt(nextIndex, now);
+  return true;
+}
+
+void beginWifiReconnectCycle(unsigned long now, bool immediate) {
+  int configuredCount = countConfiguredWifiNetworks();
+  if (configuredCount == 0) {
+    currentNetworkIndex = -1;
+    reconnectInProgress = false;
+    resetWifiAttemptState();
+    return;
+  }
+
+  reconnectInProgress = true;
+  wifiCycleStartIndex = isWifiNetworkConfigured(currentNetworkIndex)
+                          ? currentNetworkIndex
+                          : findFirstConfiguredWifiNetwork();
+  wifiAttemptNetworkIndex = -1;
+  wifiNetworksTriedThisCycle = 0;
+  wifiAttemptActive = false;
+  wifiAttemptStartMs = 0;
+
+  Serial.println("\n=== WiFi Background Connect ===");
+  wifiMatrixBlinkVisible = true;
+  lastWifiMatrixBlinkMs = now;
+  renderWifiStatusMatrix(true);
+  if (immediate) {
+    startNextWifiAttempt(now);
+  }
+}
+
+void finishWifiReconnectCycle(unsigned long now) {
+  reconnectInProgress = false;
+  resetWifiAttemptState();
+  reconnectAttemptCount++;
+  lastWifiDisconnectMs = now;
+
+  if (reconnectAttemptCount >= MAX_RECONNECT_ATTEMPTS) {
+    Serial.print("WiFi unavailable after ");
+    Serial.print(MAX_RECONNECT_ATTEMPTS);
+    Serial.println(" background scan cycles; continuing RC-only and retrying later");
+    reconnectAttemptCount = 0;
+  } else {
+    Serial.print("WiFi scan cycle failed (");
+    Serial.print(reconnectAttemptCount);
+    Serial.print("/");
+    Serial.print(MAX_RECONNECT_ATTEMPTS);
+    Serial.println("); RC remains active");
+  }
+}
+
+// Check WiFi status and advance the non-blocking background connection state
+bool checkWiFiStatus() {
   unsigned long now = millis();
 
-  // Only check at intervals
   if (now - lastWifiCheckMs < WIFI_CHECK_INTERVAL_MS) {
-    return;
+    return cachedWifiConnected;
   }
   lastWifiCheckMs = now;
 
   bool wifiConnected = (WiFi.status() == WL_CONNECTED);
+  cachedWifiConnected = wifiConnected;
 
-  if (!wifiConnected && !reconnectInProgress) {
-    // WiFi disconnected - start reconnection process
-    if (lastWifiDisconnectMs == 0) {
-      lastWifiDisconnectMs = now;
-      Serial.println("\nWiFi link lost!");
+  if (wifiConnected) {
+    bool hadPreviousWifiSession = currentNetworkIndex >= 0;
+    if (wifiAttemptActive && isWifiNetworkConfigured(wifiAttemptNetworkIndex)) {
+      currentNetworkIndex = wifiAttemptNetworkIndex;
     }
 
-    reconnectInProgress = true;
-    reconnectWiFi();
-  } else if (wifiConnected) {
-    // WiFi connected - reset disconnect timer
-    if (lastWifiDisconnectMs > 0) {
-      Serial.println("\nWiFi link restored");
+    if (wifiConnectedAtMs == 0) {
+      wifiConnectedAtMs = now;
     }
+
+    if (lastWifiDisconnectMs > 0 || !udpServersStarted) {
+      printWifiConnectedInfo(currentNetworkIndex);
+      if (lastWifiDisconnectMs > 0 && hadPreviousWifiSession) {
+        Serial.println("WiFi link restored");
+      }
+    }
+
     lastWifiDisconnectMs = 0;
-    reconnectInProgress = false;
     reconnectAttemptCount = 0;
-  }
-}
-
-// Try to connect to WiFi networks in order until successful
-bool connectToWiFi() {
-  Serial.println("\n=== Attempting WiFi Connection ===");
-
-  for (int i = 0; i < MAX_WIFI_NETWORKS; i++) {
-    // Skip empty entries
-    if (wifiNetworks[i].ssid == nullptr || strlen(wifiNetworks[i].ssid) == 0) {
-      continue;
-    }
-
-    Serial.print("Trying network [");
-    Serial.print(i + 1);
-    Serial.print("/");
-    Serial.print(MAX_WIFI_NETWORKS);
-    Serial.print("]: ");
-    Serial.println(wifiNetworks[i].ssid);
-
-    // Configure IP based on network settings
-    if (!wifiNetworks[i].use_dhcp) {
-      Serial.print("  Using static IP: ");
-      Serial.println(wifiNetworks[i].local_ip);
-      WiFi.config(wifiNetworks[i].local_ip, wifiNetworks[i].gateway, wifiNetworks[i].subnet);
-    } else {
-      Serial.println("  Using DHCP");
-      WiFi.config(IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0));
-    }
-
-    // Attempt connection
-    WiFi.begin(wifiNetworks[i].ssid, wifiNetworks[i].password);
-
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-      delay(500);
-      Serial.print(".");
-      attempts++;
-    }
-
-    // Check if connection successful
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("\nConnected!");
-      Serial.print("  Network: ");
-      Serial.println(wifiNetworks[i].ssid);
-      Serial.print("  IP Address: ");
-      Serial.println(WiFi.localIP());
-      Serial.print("  Gateway: ");
-      Serial.println(WiFi.gatewayIP());
-      Serial.print("  Subnet: ");
-      Serial.println(WiFi.subnetMask());
-      Serial.print("  RSSI: ");
-      Serial.print(WiFi.RSSI());
-      Serial.println(" dBm");
-
-      currentNetworkIndex = i;
-      return true;
-    } else {
-      Serial.println("\nConnection failed");
-    }
-
-    // Disconnect before trying next network
-    WiFi.disconnect();
-    delay(500);
+    reconnectInProgress = false;
+    resetWifiAttemptState();
+    ensureUdpServersStarted(now, wifiConnected);
+    return true;
   }
 
-  Serial.println("\nAll WiFi connection attempts failed");
-  currentNetworkIndex = -1;
+  stopUdpServers();
+  wifiConnectedAtMs = 0;
+  lastUdpStartAttemptMs = 0;
+
+  if (lastWifiDisconnectMs == 0) {
+    lastWifiDisconnectMs = now;
+    Serial.println("\nWiFi not connected - RC remains active while background connect runs");
+  }
+
+  if (wifiAttemptActive) {
+    if (now - wifiAttemptStartMs >= WIFI_CONNECT_ATTEMPT_TIMEOUT_MS) {
+      Serial.print("WiFi attempt timed out: ");
+      Serial.println(wifiNetworks[wifiAttemptNetworkIndex].ssid);
+      WiFi.disconnect();
+      wifiAttemptActive = false;
+      wifiAttemptStartMs = 0;
+      wifiNetworksTriedThisCycle++;
+
+      if (!startNextWifiAttempt(now)) {
+        finishWifiReconnectCycle(now);
+      }
+    }
+    return false;
+  }
+
+  if (!reconnectInProgress) {
+    if (now - lastWifiDisconnectMs < WIFI_RECONNECT_DELAY_MS) {
+      return false;
+    }
+    beginWifiReconnectCycle(now, false);
+  }
+
+  if (!startNextWifiAttempt(now)) {
+    finishWifiReconnectCycle(now);
+  }
   return false;
 }
 
@@ -1262,6 +1478,14 @@ void setup() {
   lastFlowState = digitalRead(FLOW_SENSOR_PIN);
   Serial.println("Flow meter sensor configured on D7");
 
+  ledMatrixInitialized = ledMatrix.begin();
+  if (ledMatrixInitialized) {
+    renderWifiStatusMatrix(false);
+    Serial.println("LED Matrix WiFi indicator initialized");
+  } else {
+    Serial.println("LED Matrix init FAILED");
+  }
+
   // Initialize DHT sensors
   if (ENABLE_DHT_SENSORS) {
     dht1.begin();
@@ -1277,22 +1501,14 @@ void setup() {
   Serial.println(" ms");
   delay(ESC_SAFE_BOOT_NEUTRAL_MS);
 
-  // Connect to WiFi (try all networks in order) only after ESC outputs are stable.
-  bool wifiConnected = connectToWiFi();
-
-  if (wifiConnected) {
-    // Start data UDP server (commands, status, flow)
-    udp.begin(UDP_PORT);
-    Serial.print("Data UDP server started on port ");
-    Serial.println(UDP_PORT);
-
-    // Start heartbeat UDP server
-    udpHeartbeat.begin(HEARTBEAT_PORT);
-    Serial.print("Heartbeat server started on port ");
-    Serial.println(HEARTBEAT_PORT);
-    Serial.println("Ready for UDP control commands");
+  // Start WiFi in the background so RC is usable immediately after setup finishes.
+  int configuredWifiCount = countConfiguredWifiNetworks();
+  if (configuredWifiCount > 0) {
+    Serial.println("WiFi background connect enabled - RC available immediately");
+    lastWifiDisconnectMs = millis();
+    beginWifiReconnectCycle(millis(), true);
   } else {
-    Serial.println("WiFi unavailable - Running in RC only mode");
+    Serial.println("No WiFi networks configured - Running in RC only mode");
   }
 
   Serial.println("\n=== System Ready ===");
@@ -1318,64 +1534,51 @@ void loop() {
   // 0. Poll flow sensor (lightweight, high frequency)
   pollFlowSensor();
 
-  // 1. Check WiFi status and auto-reconnect if needed
-  checkWiFiStatus();
-
-  // 2. Poll again after WiFi check (may have missed pulses)
-  pollFlowSensor();
-
-  // 3. Read RC inputs (non-blocking with interrupts)
+  // 1. Read RC inputs first so manual control stays responsive even during WiFi retries
   readRcInputs();
 
-  // 4. Read UDP commands (may block!)
-  readUdpCommands();
+  // 2. Check WiFi status and auto-reconnect in the background
+  bool wifiConnected = checkWiFiStatus();
 
-  // 5. Read heartbeat ping (UDP 8889)
-  readHeartbeatPing();
-
-  // 6. Poll again after UDP read (critical - UDP can block)
+  // 3. Poll again after WiFi check (may have missed pulses)
   pollFlowSensor();
 
-  // 7. Send heartbeat (may block!)
-  sendHeartbeat();
+  // 4. Read UDP commands and heartbeat only after sockets are ready
+  if (udpServersStarted) {
+    readUdpCommands();
+    readHeartbeatPing();
+  }
 
-  // 8. Poll again after heartbeat
+  // 5. Poll again after UDP read (critical - UDP can block)
   pollFlowSensor();
 
-  // 9. Determine control mode and outputs (fast)
+  // 6. Determine control mode and outputs (fast)
   determineControlMode();
 
-  // 10. Update thrusters (fast)
+  // 7. Update thrusters (fast)
   updateThrusters();
 
-  // 10.5. Dedicated PWM debug stream for investigating twitching
+  // 7.5. Dedicated PWM debug stream for investigating twitching
   printPwmEventDebug();
   printPwmDebug(now);
 
-  // 11. Send status to Jetson (may block!)
-  sendUdpStatus();
+  // 7.6. LED Matrix WiFi status indicator
+  updateWifiStatusMatrix(now, wifiConnected);
 
-  // 12. Poll again after status send
-  pollFlowSensor();
-
-  // 13. Send flow data to Jetson (may block!)
-  sendUdpFlowData();
-
-  // 13.5. Read and send DHT data
+  // 8. Refresh DHT cache before any optional telemetry send
   readDhtSensor(now);
-  sendUdpDhtData();
 
-  // 13.6. Send all data to monitor port (28889) at 1 Hz
-  sendToMonitorPort();
+  // 9. Allow at most one outbound UDP task per loop, after control outputs are updated
+  serviceOneUdpSendTask(now, wifiConnected);
 
-  // 14. Final poll before loop restart
+  // 10. Final poll before loop restart
   pollFlowSensor();
 
-  // 15. Calculate flow data (do this once per loop)
+  // 11. Calculate flow data (do this once per loop)
   calculateFlowData(now);
 
-  // 16. Connection state transitions (fast)
-  bool wifiLink = (WiFi.status() == WL_CONNECTED);
+  // 12. Connection state transitions (fast)
+  bool wifiLink = wifiConnected;
   static bool prevWifiLink = false;
   static bool stateInit = false;
   if (!stateInit) {

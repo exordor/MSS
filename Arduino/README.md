@@ -11,6 +11,8 @@ A dual thruster control system with integrated flow meter and DHT22 temperature/
 - **Dual-Port UDP**: Data (8888) and heartbeat (8889) separated for reliability
 - **PING Heartbeat (8889)**: Jetson keeps Arduino "online" without touching data port
 - **Multi-Network WiFi**: Auto-connect to configured networks with reconnection
+- **LED Matrix Status**: Onboard LED matrix blinks while WiFi is connecting and stays lit when connected
+- **Hardware PWM ESC Output**: Uses UNO R4 `PwmOut`, so DHT reads do not distort ESC pulses
 
 ## Hardware
 
@@ -23,6 +25,7 @@ A dual thruster control system with integrated flow meter and DHT22 temperature/
 | **Flow Sensor** | **D7** | **Flow meter signal (polling mode)** |
 | **DHT22 #1** | **D12** | **Temperature/Humidity sensor #1** |
 | **DHT22 #2** | **D13** | **Temperature/Humidity sensor #2** |
+| **LED Matrix** | **Onboard** | **WiFi status indicator** |
 
 ## Specifications
 
@@ -40,6 +43,8 @@ A dual thruster control system with integrated flow meter and DHT22 temperature/
 | **RC deadband** | **±40 µs (joystick drift resistance)** |
 | **WiFi filter** | **100% alpha (direct control)** |
 | **RC filter** | **25% alpha (smooth)** |
+| **ESC neutral hold at boot** | **2000 ms** |
+| **UDP socket start delay after WiFi link-up** | **300 ms** |
 
 ## Wiring
 
@@ -72,6 +77,7 @@ The system uses two separate UDP ports for cleaner protocol separation:
 - **Arduino IP**: 192.168.50.100 (configurable)
 - **Heartbeat Broadcast**: 192.168.50.255:8889 (always when WiFi connected)
 - **Jetson Unicast Heartbeat**: 192.168.50.200:28887 (only after PING)
+- **Important**: Arduino does not start unicast `S/F/D` traffic until Jetson first sends `PING` or a `C ...` command
 
 ### Message Protocol
 
@@ -151,6 +157,14 @@ Continuous operation:
 - If 2s without PING at Arduino → Arduino switches to RC and stops unicast data
 ```
 
+### Current Implementation Notes
+
+- ESC outputs are held at neutral for 2 seconds on boot before WiFi connection starts.
+- The LED matrix blinks while WiFi is connecting or reconnecting, and stays lit when WiFi is connected.
+- UDP sockets are started only after WiFi is up and the link has been stable for about 300 ms.
+- Broadcast `HEARTBEAT` packets can appear as soon as WiFi is up, but unicast `S/F/D` packets are sent only after Jetson is marked online by `PING` or `C ...`.
+- The current UNO R4 `WiFiS3` core uses a blocking `WiFi.begin()` internally, so each failed SSID can still stall boot or reconnect for roughly 10 seconds before the next network is tried.
+
 ### Why Separate Ports?
 
 1. **Protocol Clarity**: Heartbeat traffic separated from data
@@ -218,6 +232,12 @@ The Arduino automatically tries to connect to configured networks in order:
 
 Edit the `wifiNetworks[]` array in the code to add your networks.
 
+### Static IP Notes
+
+- Static IP is configured with the `WiFiS3` signature `config(local_ip, dns_server, gateway, subnet)`.
+- The bundled profiles reuse the router IP as both DNS server and gateway.
+- If Jetson is not fixed at `192.168.50.200`, update `JETSON_IP` in the sketch or communication will fail even if WiFi is connected.
+
 ## Serial Output
 
 Connect via USB at 115200 baud for debugging:
@@ -229,18 +249,25 @@ RC Control Mode: Gear Mode (9 gears, 100µs intervals)
 RC input pins configured
 RC interrupts attached
 Flow meter sensor configured on D7
+LED Matrix WiFi indicator initialized
 DHT22 sensors configured on D12 and D13
+ESCs initialized to neutral (1500 us), holding for 2000 ms
+WiFi background connect enabled - RC available immediately
 
-Connected!
+=== WiFi Background Connect ===
+WiFi connect attempt [1/3]: IGE-Geomatics-sense-mobile
+  Using static IP: 192.168.50.100
+
+WiFi connected
   Network: IGE-Geomatics-sense-mobile
   IP Address: 192.168.50.100
+  Gateway: 192.168.50.1
+  Subnet: 255.255.255.0
   RSSI: -45 dBm
 
 Data UDP server started on port 8888
-Heartbeat UDP server started on port 8889
+Heartbeat server started on port 8889
 Ready for UDP control commands
-
-ESCs initialized to neutral (1500 µs)
 
 === System Ready ===
 Control Priority: UDP > RC > Failsafe
@@ -423,11 +450,24 @@ const int DEADBAND_US = 40;            // Deadband around center (20-100µs)
 - Check data port (8888) is correct
 - Verify firewall is not blocking UDP
 
+### WiFi connected but no `S/F/D` data
+
+- Confirm Jetson sends `PING\n` to port 8889 immediately after link-up
+- `HEARTBEAT` broadcast alone does not mark Jetson online on the Arduino side
+- Check Jetson IP really is `192.168.50.200` or update `JETSON_IP` in the sketch
+- Wait for `Data UDP server started on port 8888` in Serial before expecting traffic
+
 ### No heartbeat on port 8889
 
 - Verify heartbeat port (8889) is correct
 - Check client is bound to port 8889
 - Confirm broadcast traffic is allowed on the WiFi network
+
+### Slow startup / delayed reconnect
+
+- The current UNO R4 `WiFiS3` core blocks inside `WiFi.begin()` during each connection attempt
+- A failed SSID can therefore delay boot or reconnect by roughly 10 seconds before the next network is tried
+- This is a current implementation limitation, not just a serial logging delay
 
 ### Command rate limiting
 
