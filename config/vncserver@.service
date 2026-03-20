@@ -1,0 +1,34 @@
+[Unit]
+Description=TigerVNC Server for Display %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+User=eagrumo
+Group=eagrumo
+WorkingDirectory=/home/eagrumo
+
+# PID file (actual format is hostname:590%i.pid)
+PIDFile=/home/eagrumo/.vnc/ubuntu:590%i.pid
+
+# Clean up before start
+ExecStartPre=/bin/sh -c 'vncserver -kill :%i 2>/dev/null || true'
+ExecStartPre=/bin/rm -f /tmp/.X%i-lock
+ExecStartPre=/bin/rm -f /tmp/.X11-unix/X%i
+ExecStartPre=/bin/sh -c 'sleep 1'
+
+# Start VNC server
+ExecStart=/usr/bin/vncserver -localhost no :%i
+
+# Stop VNC server
+ExecStop=/usr/bin/vncserver -kill :%i
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=300
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
