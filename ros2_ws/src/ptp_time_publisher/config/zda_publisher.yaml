@@ -1,0 +1,24 @@
+zda_publisher:
+  ros__parameters:
+    # Serial port configuration (UART to SBG IMU)
+    serial_port: "/dev/ttyTHS1"  # Jetson Tegra High-Speed UART (recommended)
+    serial_baudrate: 460800       # SBG Ellipse default baud rate
+
+    # NMEA configuration
+    talker_id: "GP"  # PTP Time (change to "GP" for GPS-compatible if SBG requires it)
+    local_zone_hours: 1  # CET (UTC+1) - adjust for your timezone
+    local_zone_minutes: 0  # Additional minutes offset
+
+    # Publishing frequency (Hz)
+    # Standard NMEA rate is 1 Hz
+    # Check SBG documentation for supported input rates
+    publish_rate: 1.0
+
+    # PTP monitoring
+    check_ptp_sync: true
+    max_offset_ms: 10.0
+    ptp_device: "/dev/ptp0"
+
+    # Fallback behavior when PTP is not synchronized
+    publish_when_unsynced: false  # Don't publish if PTP not synced
+    warning_interval: 10.0  # Warn every 10 seconds if unsynced
