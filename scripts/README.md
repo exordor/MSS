@@ -32,8 +32,15 @@ This project includes convenience wrappers for both ROS 1 and ROS 2 bringups. Al
 | `add_submodule.sh` | Adds the vendor repositories as git submodules (used during initial setup). |
 | `update_submodules.sh` | Updates all submodules to the latest registered revisions. |
 
+## Standalone serial tools
+
+| Script | Description |
+|--------|-------------|
+| `send_zda_pin8.py` | Sends NMEA sentences over the Jetson AGX Orin 40-pin header UART. The default `sbg` profile emits `RMC/GGA/GST/ZDA`, and adds `HDT` if `--heading-deg` is set; `--profile zda` preserves the original ZDA-only mode. If you omit `--latitude/--longitude` in `sbg` mode, the script auto-fills a synthetic fixed position so SBG can see a valid GNSS-like fix; use `--no-simulated-fix` to keep the old no-fix placeholder behavior. You can also replay an existing NMEA log with `--input-file output.nmea`, optionally preserving file timing. The developer kit header uses pin 8 as `UART1_TX`; override `--port` if your system exposes that UART on a different device node. Jetson pin 8 is 3.3V TTL, so SBG Ellipse box units need a level converter. Example: `python3 scripts/send_zda_pin8.py --port /dev/ttyTHS1 --baudrate 460800 --input-file output.nmea`. |
+
 ## Tips
 
+- Serial scripts require `pyserial`: `python -m pip install pyserial`
 - Run scripts from the repo root (`~/EAGRUMO`) so relative paths resolve correctly.
 - Each script forwards extra arguments to `roslaunch`, so you can override configs (e.g., `./run_all_sensors.sh bringup_camera:=false`).
 - If you modify the workspace location or ROS distro, edit the scripts accordingly.

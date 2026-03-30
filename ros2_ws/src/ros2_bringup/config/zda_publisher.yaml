@@ -1,0 +1,17 @@
+zda_publisher:
+  ros__parameters:
+    serial_port: "/dev/ttyTHS1"
+    serial_baudrate: 460800
+
+    talker_id: "GP"
+    local_zone_hours: 1
+    local_zone_minutes: 0
+
+    publish_rate: 10.0
+
+    check_ptp_sync: true
+    max_offset_ms: 10.0
+    ptp_device: "/dev/ptp0"
+
+    publish_when_unsynced: false
+    warning_interval: 10.0

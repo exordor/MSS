@@ -147,7 +147,7 @@ COMPRESSOR_CONFIG="${COMPRESSOR_CONFIG:-${DEFAULT_COMPRESSOR_CONFIG}}"
 COMPRESSOR_INPUT="${COMPRESSOR_INPUT:-/navi_lidar/points}"
 COMPRESSOR_OUTPUT="${COMPRESSOR_OUTPUT:-/points_downsampled}"
 
-for cfg in "$LIDAR_CONFIG" "$CAMERA_CONFIG" "$IMU_CONFIG" "$THRUSTER_CONFIG" "$BATTERY_CONFIG" "$RECORDER_CONFIG" "$COMPRESSOR_CONFIG"; do
+for cfg in "$LIDAR_CONFIG" "$CAMERA_CONFIG" "$IMU_CONFIG" "$THRUSTER_CONFIG" "$BATTERY_CONFIG" "$ZDA_CONFIG" "$RECORDER_CONFIG" "$COMPRESSOR_CONFIG"; do
   if [[ ! -f "$cfg" ]]; then
     echo "Config file not found: $cfg" >&2
     exit 1
@@ -177,7 +177,7 @@ set -u
 # =============================================================================
 # Cleanup any orphaned ROS 2 node processes to avoid duplicate node warnings
 # =============================================================================
-for node in "sbg_device" "galaxy_camera" "hesai_ros_driver_node" "battery_monitor" "thruster_wifi_node" "recorder_node"; do
+for node in "sbg_device" "galaxy_camera" "hesai_ros_driver_node" "battery_monitor" "zda_publisher_node" "thruster_wifi_node" "recorder_node"; do
   pkill -9 -f "$node" 2>/dev/null || true
 done
 sleep 0.5
@@ -187,6 +187,7 @@ start_ros2_healthcheck "all" \
   "galaxy_camera" \
   "sbg_device" \
   "battery_monitor" \
+  "zda_publisher" \
   "thruster_wifi_node" \
   "recorder_node" \
   "sensor_downsample_node"

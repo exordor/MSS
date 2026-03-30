@@ -76,6 +76,16 @@ def generate_launch_description():
         description='Absolute path to the battery_monitor YAML configuration file.',
     )
 
+    zda_config = DeclareLaunchArgument(
+        'zda_config',
+        default_value=PathJoinSubstitution([
+            FindPackageShare('ros2_bringup'),
+            'config',
+            'zda_publisher.yaml',
+        ]),
+        description='Absolute path to the PTP ZDA publisher YAML configuration file.',
+    )
+
     record_bag = DeclareLaunchArgument(
         'record_bag',
         default_value='false',
@@ -225,6 +235,15 @@ def generate_launch_description():
         ros_arguments=ros_args,
     )
 
+    zda_node = Node(
+        package='ptp_time_publisher',
+        executable='zda_publisher_node',
+        name='zda_publisher',
+        output='screen',
+        parameters=[LaunchConfiguration('zda_config')],
+        ros_arguments=ros_args,
+    )
+
     def launch_bag_record(context, *args, **kwargs):
         record_enabled = LaunchConfiguration('record_bag').perform(context).lower() in ('true', '1', 'yes', 'on')
         if not record_enabled:
@@ -278,6 +297,7 @@ def generate_launch_description():
         thruster_config,
         bag_config,
         battery_config,
+        zda_config,
         record_bag,
         record_topics,
         bag_output,
@@ -290,6 +310,7 @@ def generate_launch_description():
         lidar_node,
         camera_node,
         imu_node,
+        zda_node,
         thruster_node,
         recorder_node,
         compressor_node,

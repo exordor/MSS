@@ -17,6 +17,7 @@ source install/setup.bash
 - LiDAR: `ros2 launch ros2_bringup navi_lidar.launch.py`
 - Camera: `ros2 launch ros2_bringup camera.launch.py`
 - IMU: `ros2 launch ros2_bringup imu.launch.py`
+- PTP ZDA: `ros2 launch ros2_bringup ptp.launch.py`
 - Thruster: `ros2 launch ros2_bringup thruster.launch.py`
 - All sensors: `ros2 launch ros2_bringup all.launch.py`
 
@@ -26,7 +27,8 @@ Override configs with launch arguments, e.g.:
 ros2 launch ros2_bringup camera.launch.py config_file:=/path/to/camera.yaml
 ros2 launch ros2_bringup all.launch.py \
   lidar_config:=/path/to/qt128.yaml camera_config:=/path/to/camera.yaml \
-  imu_config:=/path/to/sbg.yaml thruster_config:=/path/to/thruster.yaml \
+  imu_config:=/path/to/sbg.yaml zda_config:=/path/to/zda_publisher.yaml \
+  thruster_config:=/path/to/thruster.yaml \
   record_bag:=true bag_config:=/path/to/rosbag.yaml
 ```
 

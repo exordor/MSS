@@ -11,7 +11,13 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>hesai_ros_driver</exec_depend>
+  <exec_depend>galaxy_camera</exec_depend>
+  <exec_depend>sbg_driver</exec_depend>
   <exec_depend>battery_monitor</exec_depend>
+  <exec_depend>thruster_control</exec_depend>
+  <exec_depend>ptp_time_publisher</exec_depend>
+  <exec_depend>remote_recorder</exec_depend>
+  <exec_depend>sensor_compressor</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>
