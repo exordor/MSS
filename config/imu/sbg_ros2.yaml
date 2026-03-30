@@ -254,7 +254,7 @@
       #
       # "ros" : ROS time (default)
       # "ins_unix" : INS absolute time referenced to UNIX epoch (00:00:00 UTC on 1 January 1970)
-      time_reference: "ros"
+      time_reference: "ins_unix"
 
       # Ros standard output:
       # Note: If true publish ROS standard messages.
