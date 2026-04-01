@@ -27,3 +27,6 @@ mm-viewer ./myMap.mm
 
 # ply
 mm2ply -i myMap.mm -o myMap.ply
+
+# export twist in map
+sm-cli export-keyframes myMap.simplemap --output traj.tum --output-twist twist.txt
