@@ -23,6 +23,7 @@
  *   - Ping format: PING\n (Jetson heartbeat to Arduino on 8889)
  *   - Status format: S <mode> <left_us> <right_us>\n
  *   - Flow data format: F <freq_hz> <flow_lmin> <velocity_ms> <total_liters>\n
+ *     velocity_ms is the total-station-calibrated water speed estimate
  *   - DHT data format: D <temp1> <hum1> <temp2> <hum2>\n (D12, D13) - sent to 28888 and 28889
  *   - Heartbeat: Arduino sends "HEARTBEAT\n" every 1s to both ports
  *   - Mode: 0=RC, 1=WiFi
@@ -131,23 +132,27 @@ const float K_HZ_PER_LMIN = 5.0f;         // f = 5*Q (frequency per flow rate)
 const float PULSES_PER_L = 300.0f;        // 1L ≈ 300 pulses
 const float DIAMETER_M = 0.026f;          // 26 mm pipe diameter
 const float PIPE_AREA = 3.1415926f * (DIAMETER_M * 0.5f) * (DIAMETER_M * 0.5f);
-const unsigned long FLOW_CALC_INTERVAL_MS = 1000;    // Flow calculation window (1s for accurate pulse counting)
+const unsigned long FLOW_CALC_INTERVAL_MS = 200;     // Refresh the estimate every 200 ms
+const unsigned long FLOW_ESTIMATE_WINDOW_MS = 1000;  // Use a 1 s rolling window for stability
+const byte FLOW_ESTIMATE_BIN_COUNT = FLOW_ESTIMATE_WINDOW_MS / FLOW_CALC_INTERVAL_MS;
 const unsigned long FLOW_SEND_INTERVAL_MS = 200;      // Flow UDP send rate (5 Hz)
+const unsigned long FLOW_GLITCH_FILTER_US = 250;      // Reject implausibly fast edge flips on D7
+const float FLOW_VELOCITY_CALIBRATION_SCALE_TS = 7.6490397f; // Total-station-based velocity calibration
 
 // === DHT22 Configuration ===
 const bool ENABLE_DHT_SENSORS = true;                     // Safe with hardware PWM ESC output on UNO R4
 const byte DHT_PIN_1 = 12;                             // D12 for DHT22 #1 data
 const byte DHT_PIN_2 = 13;                             // D13 for DHT22 #2 data
 #define DHT_TYPE DHT22
-const unsigned long DHT_READ_INTERVAL_MS = 2500;       // DHT22 max 0.5 Hz
-const unsigned long DHT_SEND_INTERVAL_MS = 1000;       // 1 Hz UDP send rate
+const unsigned long DHT_READ_INTERVAL_MS = 30000;      // Slow-changing pool temperature/humidity only need 30 s updates
+const unsigned long DHT_SEND_INTERVAL_MS = 30000;      // Match DHT send cadence to the slower read interval
 
 // === Timing Constants ===
 // Debug level: 0=Minimal (errors only), 1=Basic (sensors+status), 2=Verbose (all UDP)
 #define DEBUG_LEVEL 1
 const bool PWM_DEBUG_ENABLED = false;               // Dedicated PWM debug stream for RC/WiFi/ESC investigation
 const unsigned long PWM_DEBUG_INTERVAL_MS = 100;   // 10 Hz so brief twitches are still visible on Serial
-const bool PWM_EVENT_DEBUG_ENABLED = true;         // Print immediately when commanded ESC output changes
+const bool PWM_EVENT_DEBUG_ENABLED = false;         // Print immediately when commanded ESC output changes
 
 const unsigned long RC_FAILSAFE_MS = 200;            // RC signal timeout
 const unsigned long UDP_TIMEOUT_MS = 2000;           // UDP timeout (2s without data = offline)
@@ -312,9 +317,16 @@ unsigned long lastMonitorSendMs = 0 - MONITOR_PACKET_INTERVAL_MS;  // Allow imme
 unsigned long lastFlowCalcMs = 0;     // Last time flow data was calculated
 unsigned long lastFlowSendMs = 0 - FLOW_SEND_INTERVAL_MS;  // Allow immediate first send
 int lastFlowState = 0;
-unsigned long flowChangeCount = 0;
+unsigned long flowChangeCount = 0;         // Changes accumulated in the current 200 ms bin
+unsigned long flowRollingChangeCount = 0;  // Sum of changes across the rolling 1 s window
+unsigned long flowTotalChangeCount = 0;    // Total accepted changes since boot
+unsigned long flowLastEdgeUs = 0;
+unsigned long flowWindowChanges[FLOW_ESTIMATE_BIN_COUNT] = {0};
+byte flowWindowIndex = 0;
+byte flowWindowBinsFilled = 0;
 float flowFreqHz = 0.0f;
 float flowLmin = 0.0f;
+float flowVelocityRaw = 0.0f;
 float flowVelocity = 0.0f;
 double totalLiters = 0.0;
 
@@ -684,39 +696,60 @@ inline void pollFlowSensor() {
   // Single read for maximum speed
   int s = digitalRead(FLOW_SENSOR_PIN);
   if (s != lastFlowState) {
+    unsigned long nowUs = micros();
+    unsigned long sinceLastEdgeUs = nowUs - flowLastEdgeUs;
     flowChangeCount++;
+    flowTotalChangeCount++;
     lastFlowState = s;
+    if (flowLastEdgeUs != 0 && sinceLastEdgeUs < FLOW_GLITCH_FILTER_US) {
+      flowChangeCount--;
+      flowTotalChangeCount--;
+      return;
+    }
+    flowLastEdgeUs = nowUs;
   }
 }
 
-// Calculate flow rate at specified interval (1s window for accurate pulse counting)
+// Refresh the flow estimate every 200 ms using a rolling 1 s window.
+// This keeps UDP output responsive while still smoothing the noisy D7 polling input.
 void calculateFlowData(unsigned long now) {
-  if (now - lastFlowCalcMs >= FLOW_CALC_INTERVAL_MS) {
-    unsigned long dtMs = now - lastFlowCalcMs;
-    float dtS = dtMs / 1000.0f;
-
-    unsigned long changes = flowChangeCount;
+  while (now - lastFlowCalcMs >= FLOW_CALC_INTERVAL_MS) {
+    unsigned long completedBinChanges = flowChangeCount;
     flowChangeCount = 0;
 
-    // Each pulse produces 2 changes (HIGH->LOW->HIGH)
-    // Frequency = (changes / 2) / seconds
-    float freqHz = (dtS > 0) ? ((changes / 2.0f) / dtS) : 0.0f;
-    flowFreqHz = freqHz;
+    flowRollingChangeCount -= flowWindowChanges[flowWindowIndex];
+    flowWindowChanges[flowWindowIndex] = completedBinChanges;
+    flowRollingChangeCount += completedBinChanges;
 
-    // Flow rate: Q(L/min) = f(Hz) / 5
-    flowLmin = freqHz / K_HZ_PER_LMIN;
+    flowWindowIndex = (flowWindowIndex + 1) % FLOW_ESTIMATE_BIN_COUNT;
+    if (flowWindowBinsFilled < FLOW_ESTIMATE_BIN_COUNT) {
+      flowWindowBinsFilled++;
+    }
 
-    // Velocity calculation
-    float flow_m3s = (flowLmin * 0.001f) / 60.0f;
-    float velocity = (PIPE_AREA > 0) ? (flow_m3s / PIPE_AREA) : 0.0f;
-    flowVelocity = velocity;
-
-    // Total volume: each pulse represents 1/300 of a liter
-    double pulsesThisWindow = (double)changes / 2.0;
-    totalLiters += pulsesThisWindow / PULSES_PER_L;
-
-    lastFlowCalcMs = now;
+    lastFlowCalcMs += FLOW_CALC_INTERVAL_MS;
   }
+
+  float effectiveWindowS = (flowWindowBinsFilled > 0)
+                             ? ((flowWindowBinsFilled * FLOW_CALC_INTERVAL_MS) / 1000.0f)
+                             : 0.0f;
+
+  // Each pulse produces 2 changes (HIGH->LOW->HIGH).
+  float freqHz = (effectiveWindowS > 0.0f) ? ((flowRollingChangeCount / 2.0f) / effectiveWindowS) : 0.0f;
+  flowFreqHz = freqHz;
+
+  // Flow rate: Q(L/min) = f(Hz) / 5
+  flowLmin = freqHz / K_HZ_PER_LMIN;
+
+  // Convert flow to a raw 26 mm full-pipe velocity, then apply the
+  // total-station-based calibration factor for the published velocity output.
+  float flow_m3s = (flowLmin * 0.001f) / 60.0f;
+  float velocityRaw = (PIPE_AREA > 0) ? (flow_m3s / PIPE_AREA) : 0.0f;
+  flowVelocityRaw = velocityRaw;
+  flowVelocity = velocityRaw * FLOW_VELOCITY_CALIBRATION_SCALE_TS;
+
+  // Total volume remains based on the sensor pulse count specification.
+  double totalPulses = (double)flowTotalChangeCount / 2.0;
+  totalLiters = totalPulses / PULSES_PER_L;
 }
 
 // === DHT22 Functions ===
@@ -1045,9 +1078,19 @@ bool sendToMonitorPort(unsigned long now, bool wifiConnected) {
 }
 
 void serviceOneUdpSendTask(unsigned long now, bool wifiConnected) {
+  // Flow is the most timing-sensitive telemetry, so always give it first chance.
+  if (sendUdpFlowData(now, wifiConnected)) {
+    nextUdpSendTask = (UDP_SEND_TASK_FLOW + 1) % UDP_SEND_TASK_COUNT;
+    return;
+  }
+
   for (byte offset = 0; offset < UDP_SEND_TASK_COUNT; ++offset) {
     byte task = (nextUdpSendTask + offset) % UDP_SEND_TASK_COUNT;
     bool sent = false;
+
+    if (task == UDP_SEND_TASK_FLOW) {
+      continue;
+    }
 
     switch (task) {
       case UDP_SEND_TASK_HEARTBEAT:
@@ -1476,6 +1519,7 @@ void setup() {
   // Configure flow meter pin
   pinMode(FLOW_SENSOR_PIN, INPUT_PULLUP);
   lastFlowState = digitalRead(FLOW_SENSOR_PIN);
+  lastFlowCalcMs = millis();
   Serial.println("Flow meter sensor configured on D7");
 
   ledMatrixInitialized = ledMatrix.begin();
@@ -1513,9 +1557,9 @@ void setup() {
 
   Serial.println("\n=== System Ready ===");
   Serial.println("Control Priority: UDP > RC > Failsafe");
-  Serial.println("Flow Meter: D7 polling mode, 1 Hz update rate");
+  Serial.println("Flow Meter: D7 polling mode, 200 ms updates with 1 s rolling window");
   if (ENABLE_DHT_SENSORS) {
-    Serial.println("DHT22: D12 and D13, 1 Hz update rate");
+    Serial.println("DHT22: D12 and D13, 30 s update rate");
   } else {
     Serial.println("DHT22: DISABLED");
   }
@@ -1565,17 +1609,18 @@ void loop() {
   // 7.6. LED Matrix WiFi status indicator
   updateWifiStatusMatrix(now, wifiConnected);
 
-  // 8. Refresh DHT cache before any optional telemetry send
-  readDhtSensor(now);
+  // 8. Refresh the rolling flow estimate before any outbound telemetry send.
+  calculateFlowData(now);
 
-  // 9. Allow at most one outbound UDP task per loop, after control outputs are updated
+  // 9. Allow at most one outbound UDP task per loop, after control outputs are updated.
+  // Flow is prioritized inside serviceOneUdpSendTask() so it is less likely to be delayed.
   serviceOneUdpSendTask(now, wifiConnected);
 
-  // 10. Final poll before loop restart
-  pollFlowSensor();
+  // 10. DHT is low priority and slow-changing, so refresh it after flow/send work.
+  readDhtSensor(now);
 
-  // 11. Calculate flow data (do this once per loop)
-  calculateFlowData(now);
+  // 11. Final poll before loop restart
+  pollFlowSensor();
 
   // 12. Connection state transitions (fast)
   bool wifiLink = wifiConnected;
