@@ -23,7 +23,7 @@
  *   - Ping format: PING\n (Jetson heartbeat to Arduino on 8889)
  *   - Status format: S <mode> <left_us> <right_us>\n
  *   - Flow data format: F <freq_hz> <flow_lmin> <velocity_ms> <total_liters>\n
- *     velocity_ms is the total-station-calibrated water speed estimate
+ *     velocity_ms uses SENSOR_SPEED_SCALE = (26 / 14)^2 / 0.76
  *   - DHT data format: D <temp1> <hum1> <temp2> <hum2>\n (D12, D13) - sent to 28888 and 28889
  *   - Heartbeat: Arduino sends "HEARTBEAT\n" every 1s to both ports
  *   - Mode: 0=RC, 1=WiFi
@@ -137,7 +137,7 @@ const unsigned long FLOW_ESTIMATE_WINDOW_MS = 1000;  // Use a 1 s rolling window
 const byte FLOW_ESTIMATE_BIN_COUNT = FLOW_ESTIMATE_WINDOW_MS / FLOW_CALC_INTERVAL_MS;
 const unsigned long FLOW_SEND_INTERVAL_MS = 200;      // Flow UDP send rate (5 Hz)
 const unsigned long FLOW_GLITCH_FILTER_US = 250;      // Reject implausibly fast edge flips on D7
-const float FLOW_VELOCITY_CALIBRATION_SCALE_TS = 7.6490397f; // Total-station-based velocity calibration
+const float FLOW_SENSOR_SPEED_SCALE = ((26.0f / 14.0f) * (26.0f / 14.0f)) / 0.76f; // Requested sensor speed scaling
 
 // === DHT22 Configuration ===
 const bool ENABLE_DHT_SENSORS = true;                     // Safe with hardware PWM ESC output on UNO R4
@@ -740,12 +740,12 @@ void calculateFlowData(unsigned long now) {
   // Flow rate: Q(L/min) = f(Hz) / 5
   flowLmin = freqHz / K_HZ_PER_LMIN;
 
-  // Convert flow to a raw 26 mm full-pipe velocity, then apply the
-  // total-station-based calibration factor for the published velocity output.
+  // Convert flow to a raw 26 mm full-pipe velocity, then apply the requested
+  // sensor speed scaling factor for the published velocity output.
   float flow_m3s = (flowLmin * 0.001f) / 60.0f;
   float velocityRaw = (PIPE_AREA > 0) ? (flow_m3s / PIPE_AREA) : 0.0f;
   flowVelocityRaw = velocityRaw;
-  flowVelocity = velocityRaw * FLOW_VELOCITY_CALIBRATION_SCALE_TS;
+  flowVelocity = velocityRaw * FLOW_SENSOR_SPEED_SCALE;
 
   // Total volume remains based on the sensor pulse count specification.
   double totalPulses = (double)flowTotalChangeCount / 2.0;
