@@ -1,6 +1,25 @@
 thruster_wifi_node:
   ros__parameters:
-    # Network settings
+    # Transport mode: "mqtt" (default) or "udp"
+    transport_mode: "mqtt"
+
+    # MQTT settings (used when transport_mode is "mqtt")
+    mqtt_broker: "tcp://192.168.50.200:1883"
+    mqtt_client_id: "thruster_wifi_node"
+    mqtt_arduino_cmd_topic: "arduino/thruster/cmd"
+    mqtt_arduino_lease_topic: "arduino/thruster/lease"
+    mqtt_arduino_status_topic: "arduino/thruster/status"
+    mqtt_arduino_flow_topic: "arduino/flow/status"
+    mqtt_arduino_dht_topic: "arduino/dht/status"
+    mqtt_arduino_online_topic: "arduino/system/online"
+
+    # External MQTT topics (water quality, UPS from Pi5)
+    mqtt_enabled: true
+    mqtt_topics:
+      - "modbus_logger/pi5/measurements"
+      - "modbus_logger/pi5/ups_status"
+
+    # UDP settings (used when transport_mode is "udp")
     host: "192.168.50.100"         # Arduino IP address
     arduino_cmd_port: 8888         # Arduino UDP command port (receives C commands)
     arduino_ping_port: 8889        # Arduino UDP ping port (receives PING heartbeat)

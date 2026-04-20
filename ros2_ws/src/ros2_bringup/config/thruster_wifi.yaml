@@ -1,14 +1,35 @@
 thruster_wifi_node:
   ros__parameters:
-    # Network settings
-    host: "192.168.50.100"
-    arduino_port: 8888         # Arduino listening port (commands)
-    data_port: 28888           # Local data port (receives S, F)
-    heartbeat_port: 28887      # Local heartbeat port
-    udp_timeout: 5.0           # Data timeout
+    # Transport mode: "mqtt" (default) or "udp"
+    transport_mode: "mqtt"
+
+    # MQTT settings (used when transport_mode is "mqtt")
+    mqtt_broker: "tcp://192.168.50.200:1883"
+    mqtt_client_id: "thruster_wifi_node"
+    mqtt_arduino_cmd_topic: "arduino/thruster/cmd"
+    mqtt_arduino_lease_topic: "arduino/thruster/lease"
+    mqtt_arduino_status_topic: "arduino/thruster/status"
+    mqtt_arduino_flow_topic: "arduino/flow/status"
+    mqtt_arduino_dht_topic: "arduino/dht/status"
+    mqtt_arduino_online_topic: "arduino/system/online"
+
+    # External MQTT topics (water quality, UPS from Pi5)
+    mqtt_enabled: true
+    mqtt_topics:
+      - "modbus_logger/pi5/measurements"
+      - "modbus_logger/pi5/ups_status"
+
+    # UDP settings (used when transport_mode is "udp")
+    host: "192.168.50.100"         # Arduino IP address
+    arduino_cmd_port: 8888         # Arduino UDP command port (receives C commands)
+    arduino_ping_port: 8889        # Arduino UDP ping port (receives PING heartbeat)
+    data_port: 28888               # Local port to receive S status and F flow data
+    heartbeat_port: 28887          # Local port to receive HEARTBEAT messages
+    connect_timeout: 5.0
     read_interval: 0.05
     reconnect_delay: 2.0
     max_reconnect_delay: 60.0
+    udp_timeout: 5.0               # Data timeout
     stop_cmd: "C 1500 1500"
     status_frame_id: "thruster_link"
 
@@ -17,14 +38,10 @@ thruster_wifi_node:
     enable_heartbeat_log: true
     enable_command_log: true
     enable_status_log: false       # High frequency - disable by default
-    enable_speed_log: false        # High frequency - disable by default
+    enable_speed_log: true         # Enable to debug flow data reception
     log_to_file: false
     log_file_path: "/tmp/thruster_wifi.log"
     max_log_file_size_mb: 10
 
     # Metrics publishing
     metrics_publish_rate: 1.0      # Hz
-
-    # Keep-alive (send PING periodically to maintain connection)
-    keep_alive_interval: 1.0       # Seconds between keep-alive PINGs
-    ping_max_missed: 5             # Max consecutive PONG misses before declaring offline

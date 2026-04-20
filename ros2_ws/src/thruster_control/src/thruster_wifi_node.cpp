@@ -455,7 +455,7 @@ public:
     metrics_publish_rate_ = declare_parameter<double>("metrics_publish_rate", 1.0);
 
     // Transport mode: "udp" or "mqtt"
-    transport_mode_ = declare_parameter<std::string>("transport_mode", "udp");
+    transport_mode_ = declare_parameter<std::string>("transport_mode", "mqtt");
 
     // MQTT parameters
     mqtt_enabled_ = declare_parameter<bool>("mqtt_enabled", false);
