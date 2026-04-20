@@ -4,7 +4,7 @@ thruster_wifi_node:
     transport_mode: "mqtt"
 
     # MQTT settings (used when transport_mode is "mqtt")
-    mqtt_broker: "tcp://192.168.50.200:1883"
+    mqtt_broker: "tcp://127.0.0.1:1883"
     mqtt_client_id: "thruster_wifi_node"
     mqtt_arduino_cmd_topic: "arduino/thruster/cmd"
     mqtt_arduino_lease_topic: "arduino/thruster/lease"
