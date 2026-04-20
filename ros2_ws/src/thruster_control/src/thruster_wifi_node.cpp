@@ -5,6 +5,11 @@
 #include "thruster_control/msg/connection_status.hpp"
 #include "thruster_control/msg/thruster_metrics.hpp"
 #include "thruster_control/msg/temp_humidity.hpp"
+#include "thruster_control/msg/water_quality.hpp"
+#include "thruster_control/msg/ups_status.hpp"
+
+#include <mqtt/async_client.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <arpa/inet.h>
@@ -18,8 +23,10 @@
 #include <fstream>
 #include <iomanip>
 #include <memory>
+#include <mutex>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <queue>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <vector>
@@ -300,6 +307,117 @@ private:
   socklen_t arduino_ping_addrlen_{0};
 };
 
+class MqttClient : public mqtt::callback
+{
+public:
+  MqttClient() = default;
+
+  ~MqttClient() { disconnect(); }
+
+  bool connect(const std::string & broker_url, const std::string & client_id,
+               const std::vector<std::string> & topics)
+  {
+    last_error_.clear();
+    topics_ = topics;
+
+    try {
+      client_ = std::make_unique<mqtt::async_client>(broker_url, client_id);
+
+      auto opts = mqtt::connect_options_builder()
+                    .clean_session(true)
+                    .automatic_reconnect(std::chrono::seconds(2), std::chrono::seconds(30))
+                    .finalize();
+
+      client_->set_callback(*this);
+
+      auto tok = client_->connect(opts);
+      tok->wait();
+
+      for (const auto & topic : topics_) {
+        client_->subscribe(topic, 0)->wait();
+      }
+
+      connected_ = true;
+    } catch (const mqtt::exception & e) {
+      last_error_ = e.what();
+      connected_ = false;
+      return false;
+    }
+    return true;
+  }
+
+  void disconnect()
+  {
+    if (client_ && connected_) {
+      try {
+        client_->disconnect()->wait();
+      } catch (const mqtt::exception &) {
+      }
+      connected_ = false;
+    }
+  }
+
+  bool isConnected() const { return connected_; }
+  const std::string & lastError() const { return last_error_; }
+
+  void drainQueue(std::queue<std::pair<std::string, std::string>> & out)
+  {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    out.swap(message_queue_);
+  }
+
+  bool publish(const std::string & topic, const std::string & payload, int qos = 0, bool retained = false)
+  {
+    if (!client_ || !connected_) {
+      return false;
+    }
+    try {
+      auto msg = mqtt::make_message(topic, payload, qos, retained);
+      client_->publish(msg);
+      return true;
+    } catch (const mqtt::exception & e) {
+      last_error_ = e.what();
+      return false;
+    }
+  }
+
+private:
+  // mqtt::callback interface
+  void message_arrived(mqtt::const_message_ptr msg) override
+  {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    message_queue_.emplace(msg->get_topic(), msg->get_payload_str());
+  }
+
+  void connection_lost(const std::string & cause) override
+  {
+    connected_ = false;
+    last_error_ = "Connection lost: " + cause;
+  }
+
+  void connected(const std::string & cause) override
+  {
+    connected_ = true;
+    last_error_.clear();
+    // Re-subscribe after reconnect
+    if (client_) {
+      for (const auto & topic : topics_) {
+        try {
+          client_->subscribe(topic, 0);
+        } catch (const mqtt::exception &) {
+        }
+      }
+    }
+  }
+
+  std::unique_ptr<mqtt::async_client> client_;
+  std::vector<std::string> topics_;
+  std::mutex queue_mutex_;
+  std::queue<std::pair<std::string, std::string>> message_queue_;
+  std::string last_error_;
+  bool connected_{false};
+};
+
 class ThrusterWifiNode : public rclcpp::Node
 {
 public:
@@ -336,6 +454,26 @@ public:
     // Metrics parameters
     metrics_publish_rate_ = declare_parameter<double>("metrics_publish_rate", 1.0);
 
+    // Transport mode: "udp" or "mqtt"
+    transport_mode_ = declare_parameter<std::string>("transport_mode", "udp");
+
+    // MQTT parameters
+    mqtt_enabled_ = declare_parameter<bool>("mqtt_enabled", false);
+    mqtt_broker_ = declare_parameter<std::string>("mqtt_broker", "tcp://localhost:1883");
+    mqtt_client_id_ = declare_parameter<std::string>("mqtt_client_id", "thruster_wifi_node");
+    mqtt_topics_ = declare_parameter<std::vector<std::string>>("mqtt_topics",
+      std::vector<std::string>{"modbus_logger/pi5/measurements", "modbus_logger/pi5/ups_status"});
+
+    // Arduino MQTT topics (used when transport_mode == "mqtt")
+    mqtt_arduino_cmd_topic_ = declare_parameter<std::string>("mqtt_arduino_cmd_topic", "arduino/thruster/cmd");
+    mqtt_arduino_lease_topic_ = declare_parameter<std::string>("mqtt_arduino_lease_topic", "arduino/thruster/lease");
+    mqtt_arduino_status_topic_ = declare_parameter<std::string>("mqtt_arduino_status_topic", "arduino/thruster/status");
+    mqtt_arduino_flow_topic_ = declare_parameter<std::string>("mqtt_arduino_flow_topic", "arduino/flow/status");
+    mqtt_arduino_dht_topic_ = declare_parameter<std::string>("mqtt_arduino_dht_topic", "arduino/dht/status");
+    mqtt_arduino_online_topic_ = declare_parameter<std::string>("mqtt_arduino_online_topic", "arduino/system/online");
+
+    const bool mqtt_transport = (transport_mode_ == "mqtt");
+
     // Initialize file logging if enabled
     if (log_to_file_) {
       initFileLogging();
@@ -347,6 +485,8 @@ public:
     temp_humidity_pub_ = create_publisher<thruster_control::msg::TempHumidity>("temp_humidity", 10);
     connection_pub_ = create_publisher<thruster_control::msg::ConnectionStatus>("thruster_connection_status", 10);
     metrics_pub_ = create_publisher<thruster_control::msg::ThrusterMetrics>("thruster_metrics", 10);
+    water_quality_pub_ = create_publisher<thruster_control::msg::WaterQuality>("water_quality", 10);
+    ups_status_pub_ = create_publisher<thruster_control::msg::UpsStatus>("ups_status", 10);
 
     // Subscriber
     command_sub_ = create_subscription<thruster_control::msg::ThrusterCmdPWM>(
@@ -366,23 +506,60 @@ public:
     loop_start_ = std::chrono::steady_clock::now();
     stats_.stats_start = std::chrono::steady_clock::now();
 
-    logInfo("Thruster WiFi Node initialized");
-    logInfo("Arduino command: " + host_ + ":" + std::to_string(arduino_cmd_port_));
-    logInfo("Arduino PING: " + host_ + ":" + std::to_string(arduino_ping_port_) + " (local port: " + std::to_string(arduino_ping_port_) + ")");
-    logInfo("Local data port: " + std::to_string(data_port_) + ", heartbeat port: " + std::to_string(heartbeat_port_));
+    logInfo("Thruster WiFi Node initialized (transport: " + transport_mode_ + ")");
+    if (transport_mode_ != "mqtt") {
+      logInfo("Arduino command: " + host_ + ":" + std::to_string(arduino_cmd_port_));
+      logInfo("Arduino PING: " + host_ + ":" + std::to_string(arduino_ping_port_) + " (local port: " + std::to_string(arduino_ping_port_) + ")");
+      logInfo("Local data port: " + std::to_string(data_port_) + ", heartbeat port: " + std::to_string(heartbeat_port_));
+    } else {
+      logInfo("MQTT Arduino topics: " + mqtt_arduino_cmd_topic_ + ", " + mqtt_arduino_status_topic_ +
+              ", " + mqtt_arduino_flow_topic_ + ", " + mqtt_arduino_dht_topic_);
+    }
+    logInfo("Log level: " + log_level_);
+
+    // MQTT initialization
+    if (mqtt_enabled_ || mqtt_transport) {
+      // Build subscription topic list: external data + Arduino telemetry (if MQTT transport)
+      auto all_topics = mqtt_topics_;
+      if (mqtt_transport) {
+        all_topics.push_back(mqtt_arduino_status_topic_);
+        all_topics.push_back(mqtt_arduino_flow_topic_);
+        all_topics.push_back(mqtt_arduino_dht_topic_);
+        all_topics.push_back(mqtt_arduino_online_topic_);
+      }
+
+      if (mqtt_client_.connect(mqtt_broker_, mqtt_client_id_, all_topics)) {
+        logInfo("MQTT connected to " + mqtt_broker_);
+        for (const auto & t : all_topics) {
+          logInfo("MQTT subscribed: " + t);
+        }
+      } else {
+        logError("MQTT connect failed: " + std::string(mqtt_client_.lastError()));
+      }
+    }
     logInfo("Log level: " + log_level_);
   }
 
   ~ThrusterWifiNode() override
   {
-    if (client_.isConnected() && !stop_command_.empty()) {
-      if (client_.sendCommand(stop_command_)) {
-        logInfo("Sent stop command on shutdown: " + stop_command_);
-      } else {
-        logWarn("Failed to send stop command on shutdown");
+    if (!stop_command_.empty()) {
+      if (transport_mode_ == "mqtt" && mqtt_client_.isConnected()) {
+        nlohmann::json j;
+        j["left_us"] = 1500;
+        j["right_us"] = 1500;
+        if (mqtt_client_.publish(mqtt_arduino_cmd_topic_, j.dump(), 0, false)) {
+          logInfo("Sent MQTT stop command on shutdown");
+        }
+      } else if (client_.isConnected()) {
+        if (client_.sendCommand(stop_command_)) {
+          logInfo("Sent stop command on shutdown: " + stop_command_);
+        } else {
+          logWarn("Failed to send stop command on shutdown");
+        }
       }
     }
     client_.close();
+    mqtt_client_.disconnect();
 
     // Close log file
     if (log_file_.is_open()) {
@@ -500,15 +677,26 @@ private:
       publishConnectionStatus();
     }
 
-    if (!client_.isConnected()) {
-      if (now >= next_reconnect_time_) {
-        attemptConnect();
+    if (transport_mode_ == "mqtt") {
+      // MQTT mode: process all MQTT messages (Arduino telemetry + external data)
+      handleMqttMessages();
+    } else {
+      // UDP mode: poll UDP socket for Arduino data
+      if (!client_.isConnected()) {
+        if (now >= next_reconnect_time_) {
+          attemptConnect();
+        }
+        return;
       }
-      return;
-    }
 
-    // Read data from socket (status, speed, heartbeat)
-    pollSocket();
+      // Read data from socket (status, speed, heartbeat)
+      pollSocket();
+
+      // Process external MQTT messages (water quality, UPS)
+      if (mqtt_enabled_) {
+        handleMqttMessages();
+      }
+    }
 
     // Publish metrics periodically
     publishMetrics();
@@ -556,9 +744,17 @@ private:
 
   void handleCommand(const thruster_control::msg::ThrusterCmdPWM::SharedPtr msg)
   {
-    if (!client_.isConnected()) {
-      logWarn("UDP not bound; command dropped");
-      return;
+    // Check transport availability
+    if (transport_mode_ == "mqtt") {
+      if (!mqtt_client_.isConnected()) {
+        logWarn("MQTT not connected; command dropped");
+        return;
+      }
+    } else {
+      if (!client_.isConnected()) {
+        logWarn("UDP not bound; command dropped");
+        return;
+      }
     }
 
     const bool is_stop_command = (msg->left_pwm == 1500 && msg->right_pwm == 1500);
@@ -579,21 +775,42 @@ private:
       }
     }
 
-    const std::string payload = formatCommand(msg->left_pwm, msg->right_pwm);
-    if (!client_.sendCommand(payload)) {
-      logError("Failed to send command: " + std::string(client_.lastError()));
+    bool send_ok = false;
+    std::string payload_str;
+
+    if (transport_mode_ == "mqtt") {
+      // MQTT mode: publish JSON command
+      nlohmann::json j;
+      j["left_us"] = msg->left_pwm;
+      j["right_us"] = msg->right_pwm;
+      j["ts_ms"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+      payload_str = j.dump();
+      send_ok = mqtt_client_.publish(mqtt_arduino_cmd_topic_, payload_str, 0, false);
+    } else {
+      // UDP mode: send text command
+      payload_str = formatCommand(msg->left_pwm, msg->right_pwm);
+      send_ok = client_.sendCommand(payload_str);
+    }
+
+    if (!send_ok) {
+      const std::string & err = (transport_mode_ == "mqtt")
+        ? mqtt_client_.lastError() : client_.lastError();
+      logError("Failed to send command: " + err);
 
       last_sent_valid_ = false;
       last_command_was_stop_ = false;
       logWarn("State tracking invalidated due to send failure");
 
-      next_reconnect_time_ = now;
+      if (transport_mode_ != "mqtt") {
+        next_reconnect_time_ = now;
+      }
       return;
     }
 
     stats_.tx_packets++;
     if (log_command_) {
-      logInfo("TX PWM: " + payload);
+      logInfo("TX PWM: " + payload_str);
     }
 
     // Only update tracking after successful send
@@ -708,8 +925,167 @@ private:
     }
   }
 
+  void handleMqttMessages()
+  {
+    if (!mqtt_client_.isConnected()) {
+      return;
+    }
+
+    std::queue<std::pair<std::string, std::string>> local;
+    mqtt_client_.drainQueue(local);
+
+    const auto now = std::chrono::steady_clock::now();
+    bool got_arduino_data = false;
+
+    while (!local.empty()) {
+      auto & [topic, payload] = local.front();
+
+      // Track Arduino telemetry freshness for online detection
+      if (transport_mode_ == "mqtt" && isArduinoMqttTopic(topic)) {
+        got_arduino_data = true;
+      }
+
+      handleMqttMessage(topic, payload);
+      local.pop();
+    }
+
+    if (got_arduino_data) {
+      last_udp_receive_ = now;
+    }
+  }
+
+  void handleMqttMessage(const std::string & topic, const std::string & payload)
+  {
+    try {
+      auto j = nlohmann::json::parse(payload);
+
+      if (topic == "modbus_logger/pi5/measurements") {
+        thruster_control::msg::WaterQuality msg;
+        msg.header.stamp = this->get_clock()->now();
+        msg.header.frame_id = status_frame_id_;
+        msg.run_id = j.value("run_id", "");
+        msg.measurement_id = j.value("measurement_id", 0);
+        msg.elapsed_s = j.value("elapsed_s", 0.0);
+
+        if (j.contains("results")) {
+          auto & r = j["results"];
+
+          if (r.contains("C4E_Leitfaehigkeit")) {
+            auto & c = r["C4E_Leitfaehigkeit"];
+            msg.c4e_temp_c = c.value("Temperatur_C", 0.0);
+            msg.c4e_conductivity_uscm = c.value("Leitfaehigkeit_uScm", 0.0);
+            msg.c4e_salinity_ppt = c.value("Salinitaet_ppt", 0.0);
+            msg.c4e_tds_ppm = c.value("TDS_ppm", 0.0);
+          }
+          if (r.contains("OPTOD_Sauerstoff")) {
+            auto & o = r["OPTOD_Sauerstoff"];
+            msg.optod_temp_c = o.value("Temperatur_C", 0.0);
+            msg.optod_o2_saturation_pct = o.value("O2_Saettigung_pct", 0.0);
+            msg.optod_o2_mgl = o.value("O2_mgL", 0.0);
+            msg.optod_o2_ppm = o.value("O2_ppm", 0.0);
+          }
+          if (r.contains("pH_Redox")) {
+            auto & p = r["pH_Redox"];
+            msg.ph_temp_c = p.value("Temperatur_C", 0.0);
+            msg.ph_ph = p.value("pH", 0.0);
+            msg.ph_redox_mv = p.value("Redox_mV", 0.0);
+            msg.ph_mv = p.value("pH_mV", 0.0);
+          }
+        }
+
+        water_quality_pub_->publish(msg);
+        stats_.rx_mqtt_water_quality++;
+      } else if (topic == "modbus_logger/pi5/ups_status") {
+        thruster_control::msg::UpsStatus msg;
+        msg.header.stamp = this->get_clock()->now();
+        msg.header.frame_id = status_frame_id_;
+        msg.elapsed_s = j.value("elapsed_s", 0.0);
+        msg.component = j.value("component", "");
+        msg.parameter = j.value("parameter", "");
+        msg.value = j.value("value", 0.0);
+        msg.state = j.value("state", "");
+        ups_status_pub_->publish(msg);
+        stats_.rx_mqtt_ups++;
+      } else if (topic == mqtt_arduino_status_topic_) {
+        // Arduino thruster status: {"mode":"mqtt","left_us":1600,"right_us":1580,...}
+        thruster_control::msg::ThrusterStatusPWM msg;
+        msg.header.stamp = this->get_clock()->now();
+        msg.header.frame_id = status_frame_id_;
+        msg.mode = (j.value("mode", "rc") == "mqtt") ? 1 : 0;
+        msg.left_pwm = j.value("left_us", 1500);
+        msg.right_pwm = j.value("right_us", 1500);
+        status_pub_->publish(msg);
+        stats_.rx_status++;
+      } else if (topic == mqtt_arduino_flow_topic_) {
+        // Arduino flow data: {"freq_hz":12.4,"flow_lmin":2.48,"velocity_ms":0.1342,"total_liters":18.352}
+        thruster_control::msg::SpeedData msg;
+        msg.header.stamp = this->get_clock()->now();
+        msg.header.frame_id = status_frame_id_;
+        msg.freq_hz = j.value("freq_hz", 0.0);
+        msg.flow_lmin = j.value("flow_lmin", 0.0);
+        msg.velocity_ms = j.value("velocity_ms", 0.0);
+        msg.total_liters = j.value("total_liters", 0.0);
+        speed_pub_->publish(msg);
+        stats_.rx_speed++;
+      } else if (topic == mqtt_arduino_dht_topic_) {
+        // Arduino DHT data: {"sensor_1":{"temp_c":24.3,"hum_pct":55.2},...}
+        thruster_control::msg::TempHumidity msg;
+        msg.header.stamp = this->get_clock()->now();
+        msg.header.frame_id = status_frame_id_;
+        if (j.contains("sensor_1")) {
+          msg.temp1 = j["sensor_1"].value("temp_c", 0.0);
+          msg.humidity1 = j["sensor_1"].value("hum_pct", 0.0);
+        }
+        if (j.contains("sensor_2")) {
+          msg.temp2 = j["sensor_2"].value("temp_c", 0.0);
+          msg.humidity2 = j["sensor_2"].value("hum_pct", 0.0);
+        }
+        temp_humidity_pub_->publish(msg);
+        stats_.rx_temp_humidity++;
+      } else if (topic == mqtt_arduino_online_topic_) {
+        // Arduino system online: {"state":"online"} or {"state":"offline"}
+        std::string state = j.value("state", "");
+        if (state == "online") {
+          logInfo("Arduino MQTT system online");
+        } else if (state == "offline") {
+          logWarn("Arduino MQTT system offline (last will)");
+        }
+      } else if (transport_mode_ == "mqtt") {
+        stats_.mqtt_parse_errors++;
+        logDebug("MQTT unknown Arduino topic: " + topic);
+      } else {
+        stats_.mqtt_parse_errors++;
+        logDebug("MQTT unknown topic: " + topic);
+      }
+    } catch (const nlohmann::json::parse_error & e) {
+      stats_.mqtt_parse_errors++;
+      logWarn("MQTT JSON parse error on " + topic + ": " + e.what());
+    }
+  }
+
   void onPingTimer()
   {
+    if (transport_mode_ == "mqtt") {
+      // MQTT mode: publish lease message
+      if (!mqtt_client_.isConnected()) {
+        return;
+      }
+      nlohmann::json j;
+      j["client"] = "jetson-control";
+      j["ts_ms"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+      if (mqtt_client_.publish(mqtt_arduino_lease_topic_, j.dump(), 0, false)) {
+        stats_.tx_ping++;
+        if (log_command_) {
+          logDebug("TX MQTT LEASE");
+        }
+      } else {
+        logError("Failed to publish MQTT lease: " + std::string(mqtt_client_.lastError()));
+      }
+      return;
+    }
+
+    // UDP mode: send PING
     if (!client_.isConnected()) {
       return;
     }
@@ -728,7 +1104,11 @@ private:
   {
     thruster_control::msg::ConnectionStatus msg;
     msg.header.stamp = this->get_clock()->now();
-    msg.wifi_bound = client_.isConnected();
+    if (transport_mode_ == "mqtt") {
+      msg.wifi_bound = mqtt_client_.isConnected();
+    } else {
+      msg.wifi_bound = client_.isConnected();
+    }
     msg.arduino_online = arduino_online_;
     msg.reconnect_count = reconnect_count_;
     msg.uptime_sec = stats_.uptimeSec();
@@ -805,13 +1185,16 @@ private:
     uint64_t parse_errors{0};
     uint64_t timeouts{0};
     uint64_t bytes_received{0};
+    uint64_t rx_mqtt_water_quality{0};
+    uint64_t rx_mqtt_ups{0};
+    uint64_t mqtt_parse_errors{0};
     std::chrono::steady_clock::time_point stats_start;
 
     void reset()
     {
       tx_packets = tx_ping = rx_packets = rx_heartbeat = rx_status = rx_speed = rx_temp_humidity = 0;
-      parse_errors = timeouts = 0;
-      bytes_received = 0;
+      parse_errors = timeouts = bytes_received = 0;
+      rx_mqtt_water_quality = rx_mqtt_ups = mqtt_parse_errors = 0;
       stats_start = std::chrono::steady_clock::now();
     }
 
@@ -823,6 +1206,14 @@ private:
   };
 
   // === Parser Methods ===
+
+  bool isArduinoMqttTopic(const std::string & topic) const
+  {
+    return topic == mqtt_arduino_status_topic_ ||
+           topic == mqtt_arduino_flow_topic_ ||
+           topic == mqtt_arduino_dht_topic_ ||
+           topic == mqtt_arduino_online_topic_;
+  }
 
   static std::optional<StatusSample> parseStatus(const std::string & line)
   {
@@ -981,6 +1372,8 @@ private:
   rclcpp::Publisher<thruster_control::msg::TempHumidity>::SharedPtr temp_humidity_pub_;
   rclcpp::Publisher<thruster_control::msg::ConnectionStatus>::SharedPtr connection_pub_;
   rclcpp::Publisher<thruster_control::msg::ThrusterMetrics>::SharedPtr metrics_pub_;
+  rclcpp::Publisher<thruster_control::msg::WaterQuality>::SharedPtr water_quality_pub_;
+  rclcpp::Publisher<thruster_control::msg::UpsStatus>::SharedPtr ups_status_pub_;
 
   // Subscriber
   rclcpp::Subscription<thruster_control::msg::ThrusterCmdPWM>::SharedPtr command_sub_;
@@ -1015,6 +1408,22 @@ private:
   int32_t last_sent_left_pwm_{0};
   int32_t last_sent_right_pwm_{0};
   bool last_sent_valid_{false};
+
+  // MQTT
+  MqttClient mqtt_client_;
+  bool mqtt_enabled_{false};
+  std::string mqtt_broker_;
+  std::string mqtt_client_id_;
+  std::vector<std::string> mqtt_topics_;
+
+  // Transport mode
+  std::string transport_mode_;
+  std::string mqtt_arduino_cmd_topic_;
+  std::string mqtt_arduino_lease_topic_;
+  std::string mqtt_arduino_status_topic_;
+  std::string mqtt_arduino_flow_topic_;
+  std::string mqtt_arduino_dht_topic_;
+  std::string mqtt_arduino_online_topic_;
 };
 
 }  // namespace thruster_control

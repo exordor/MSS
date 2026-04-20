@@ -10,6 +10,9 @@
 
   <depend>rclcpp</depend>
   <depend>std_msgs</depend>
+  <depend>libpaho-mqtt-dev</depend>
+  <depend>libpaho-mqttpp-dev</depend>
+  <depend>nlohmann-json3-dev</depend>
 
   <build_depend>rosidl_default_generators</build_depend>
   <exec_depend>rosidl_default_runtime</exec_depend>
