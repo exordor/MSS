@@ -98,6 +98,17 @@ SENSOR_NODES = nodes_cfg.get("sensor_nodes", {})
 
 SENSOR_CONNECTION_TYPES = cfg.get("sensor_connections", {})
 
+mqtt_cfg = cfg.get("mqtt", {})
+MQTT_CONFIG = {
+    "enabled": bool(mqtt_cfg.get("enabled", False)),
+    "broker_host": mqtt_cfg.get("broker_host", "192.168.50.200"),
+    "broker_port": int(mqtt_cfg.get("broker_port", 1883)),
+    "client_id": mqtt_cfg.get("client_id", "ros2_diagnostic"),
+    "data_timeout": float(mqtt_cfg.get("data_timeout", 10.0)),
+    "arduino_topics": mqtt_cfg.get("arduino_topics", {}),
+    "pi5_topics": mqtt_cfg.get("pi5_topics", {}),
+}
+
 monitor_cfg = cfg.get("monitoring", {})
 ENABLE_TOPIC_DETAILS = bool(monitor_cfg.get("enable_topic_details", False))
 CACHE_TTL = monitor_cfg.get("cache_ttl", {})

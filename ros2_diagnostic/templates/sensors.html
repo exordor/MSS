@@ -30,6 +30,9 @@
         <button class="sensor-tab" data-sensor="battery">
             <i class="fa-solid fa-battery-half"></i> Battery
         </button>
+        <button class="sensor-tab" data-sensor="pi5_sensors">
+            <i class="fa-solid fa-water"></i> Pi5 Sensors
+        </button>
     </div>
 
     <!-- Navi LiDAR Panel -->
@@ -320,6 +323,108 @@
                     <div class="info-row">
                         <span class="info-label">Channel A3 (Antrieb -)</span>
                         <span class="info-value" id="batteryA3">-- V</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pi5 Sensors Panel -->
+    <div class="sensor-panel" id="pi5_sensorsPanel">
+        <div class="panel-header">
+            <div class="panel-title">
+                <i class="fa-solid fa-water"></i>
+                <h2>Pi5 Water Quality & UPS</h2>
+            </div>
+            <span class="status-badge large" id="pi5SensorsStatusBadge">Checking...</span>
+        </div>
+
+        <div class="panel-sections">
+            <!-- Connection Status -->
+            <div class="panel-section">
+                <h3><i class="fa-solid fa-network-wired"></i> Connection Status</h3>
+                <div class="connection-info">
+                    <div class="info-row">
+                        <span class="info-label">IP Address</span>
+                        <span class="info-value">192.168.50.73</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Network</span>
+                        <span class="info-value" id="pi5NetworkStatus">--</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Data Age</span>
+                        <span class="info-value" id="pi5DataAge">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Water Quality (C4E Conductivity) -->
+            <div class="panel-section">
+                <h3><i class="fa-solid fa-droplet"></i> Water Quality</h3>
+                <div class="connection-info">
+                    <div class="info-row">
+                        <span class="info-label">C4E Temperature</span>
+                        <span class="info-value" id="pi5C4eTemp">-- °C</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Conductivity</span>
+                        <span class="info-value" id="pi5Conductivity">-- µS/cm</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Salinity</span>
+                        <span class="info-value" id="pi5Salinity">-- ppt</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">TDS</span>
+                        <span class="info-value" id="pi5Tds">-- ppm</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">OPTDO Temperature</span>
+                        <span class="info-value" id="pi5OptodTemp">-- °C</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">O2 Saturation</span>
+                        <span class="info-value" id="pi5O2Sat">-- %</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">O2 Concentration</span>
+                        <span class="info-value" id="pi5O2Mgl">-- mg/L</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">pH Temperature</span>
+                        <span class="info-value" id="pi5PhTemp">-- °C</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">pH</span>
+                        <span class="info-value" id="pi5Ph">--</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Redox</span>
+                        <span class="info-value" id="pi5Redox">-- mV</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- UPS Status -->
+            <div class="panel-section">
+                <h3><i class="fa-solid fa-bolt"></i> UPS Status</h3>
+                <div class="connection-info">
+                    <div class="info-row">
+                        <span class="info-label">Component</span>
+                        <span class="info-value" id="pi5UpsComponent">--</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Parameter</span>
+                        <span class="info-value" id="pi5UpsParameter">--</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Value</span>
+                        <span class="info-value" id="pi5UpsValue">--</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">State</span>
+                        <span class="info-value" id="pi5UpsState">--</span>
                     </div>
                 </div>
             </div>

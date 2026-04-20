@@ -56,6 +56,24 @@ logs:
   ros2_control_log: "ros2_diagnostic/logs/ros2.log"
 
 # ------------------------------------------------------------------------------
+# MQTT Configuration
+# ------------------------------------------------------------------------------
+mqtt:
+  enabled: true
+  broker_host: "127.0.0.1"
+  broker_port: 1883
+  client_id: "ros2_diagnostic"
+  data_timeout: 60.0            # Seconds before MQTT-sourced data is stale (Pi5 sends every 30s)
+  arduino_topics:
+    thruster_status: "arduino/thruster/status"
+    flow_status: "arduino/flow/status"
+    dht_status: "arduino/dht/status"
+    system_online: "arduino/system/online"
+  pi5_topics:
+    measurements: "modbus_logger/pi5/measurements"
+    ups_status: "modbus_logger/pi5/ups_status"
+
+# ------------------------------------------------------------------------------
 # Sensor Configuration
 # ------------------------------------------------------------------------------
 sensors:
@@ -67,6 +85,7 @@ sensors:
     thruster: "192.168.50.100"     # Thruster controller WiFi module
     time_machine: "192.168.0.20"   # Time synchronization server (PTP grandmaster)
     battery: "192.168.0.50"        # Battery monitor (I2C on local host, IP placeholder)
+    pi5: "192.168.50.73"           # Raspberry Pi 5 (water quality, UPS via MQTT)
 
   # I2C configuration for locally connected sensors
   i2c:
@@ -204,8 +223,9 @@ sensor_connections:
   uli_lidar: "network"     # Ethernet (web interface only)
   camera: "network"        # GigE Vision protocol
   imu: "usb"               # Serial-over-USB connection
-  thruster: "network"      # WiFi (UDP)
+  thruster: "network"      # WiFi (MQTT/UDP)
   battery: "i2c"           # I2C (local ADS1115)
+  pi5_sensors: "mqtt"      # MQTT (water quality, UPS)
 
 # ------------------------------------------------------------------------------
 # Monitoring Behavior

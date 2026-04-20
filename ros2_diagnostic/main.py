@@ -34,13 +34,15 @@ from config import (
     ROS2_CONFIG, ROS2_CONTROL, ROSBAG_CONFIG, SENSOR_IPS, SENSOR_THRESHOLDS,
     EXPECTED_NODES, IGNORED_NODES, SENSOR_NODES, ROS2_TOPICS,
     ENABLE_TOPIC_DETAILS, CACHE_TTL, LOG_FILES, LOG_ROOT, UI_CONFIG, PROJECT_ROOT,
-    TOOLS_CONFIG_FILES, TOOLS_SCRIPTS, EVENT_LOG_CONFIG, SENSOR_I2C, TIME_CONFIG
+    TOOLS_CONFIG_FILES, TOOLS_SCRIPTS, EVENT_LOG_CONFIG, SENSOR_I2C, TIME_CONFIG,
+    MQTT_CONFIG
 )
 from diagnostics import ROS2Monitor, ROS2Controller
 from diagnostics.rosbag_controller import get_rosbag_controller
 from diagnostics.sensor_monitor import (
     NaviLidarDiagnostic, UliLidarDiagnostic,
-    CameraDiagnostic, IMUDiagnostic, ThrusterDiagnostic, BatteryDiagnostic
+    CameraDiagnostic, IMUDiagnostic, ThrusterDiagnostic, BatteryDiagnostic,
+    Pi5SensorsDiagnostic
 )
 from alerts import get_alert_store, Alert
 from event_log import get_event_store, EventLog
@@ -762,6 +764,7 @@ def get_monitor(name: str):
                     'SENSOR_IPS': SENSOR_IPS,
                     'ROS2_TOPICS': ROS2_TOPICS,
                     'ENABLE_TOPIC_DETAILS': ENABLE_TOPIC_DETAILS,
+                    'MQTT': MQTT_CONFIG,
                 })
             elif name == 'battery':
                 _monitors[name] = BatteryDiagnostic({
@@ -771,6 +774,11 @@ def get_monitor(name: str):
                     'ROS2_CONFIG': ROS2_CONFIG,
                     'ENABLE_TOPIC_DETAILS': ENABLE_TOPIC_DETAILS,
                     'SENSOR_I2C': SENSOR_I2C,
+                })
+            elif name == 'pi5_sensors':
+                _monitors[name] = Pi5SensorsDiagnostic({
+                    'MQTT': MQTT_CONFIG,
+                    'SENSOR_IPS': SENSOR_IPS,
                 })
         return _monitors[name]
 
@@ -907,6 +915,8 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
                 connected = 'Disconnected'
             else:
                 connected = '--'
+        elif sensor_name == 'pi5_sensors':
+            connected = 'Connected' if metrics.get('reachable') else 'Disconnected'
 
         # Extract topic and node availability using helper functions
         # This ensures consistent detection across all code paths
@@ -938,6 +948,7 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
                     'camera': 'Camera',
                     'imu': 'IMU',
                     'thruster': 'Arduino',
+                    'pi5_sensors': 'Pi5 Sensors',
                 }
                 display_name = sensor_display_names.get(sensor_name, sensor_name)
                 if 'connected' in summary['status']:
@@ -978,6 +989,11 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
         elif sensor_name == 'battery':
             if 'voltages' in summary:
                 result['voltages'] = summary['voltages']
+        elif sensor_name == 'pi5_sensors':
+            if 'water_quality' in summary:
+                result['water_quality'] = summary['water_quality']
+            if 'ups' in summary:
+                result['ups'] = summary['ups']
 
         return result
     except Exception as e:
@@ -998,7 +1014,7 @@ async def check_sensor_async(sensor_name: str) -> Dict[str, Any]:
 
 async def collect_sensor_status_parallel() -> Dict[str, Any]:
     """Collect sensor status in parallel using asyncio."""
-    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery']
+    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery', 'pi5_sensors']
 
     # Run all sensor checks in parallel
     tasks = [check_sensor_async(name) for name in sensor_names]
@@ -1068,7 +1084,7 @@ def _summarize_sensor_results(sensors: Dict[str, Any]) -> Dict[str, Any]:
 
 async def _broadcast_sensors_incremental() -> Dict[str, Any]:
     """Broadcast sensor updates incrementally as each check completes."""
-    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery']
+    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery', 'pi5_sensors']
 
     async def _run_sensor_check(name: str):
         try:
@@ -1163,7 +1179,7 @@ def _collect_connectivity_sync(sensor_name: str) -> Dict[str, Any]:
 
 async def _broadcast_connectivity_incremental() -> None:
     """Broadcast connectivity updates incrementally."""
-    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery']
+    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery', 'pi5_sensors']
 
     async def _run(name: str):
         return name, await asyncio.to_thread(_collect_connectivity_sync, name)
@@ -1449,7 +1465,7 @@ def _get_domain_id() -> int:
 
 def collect_sensor_status() -> Dict[str, Any]:
     """Collect status of all sensors (internal, non-cached)"""
-    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery']
+    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery', 'pi5_sensors']
     sensors = {}
 
     for name in sensor_names:
@@ -1529,6 +1545,7 @@ def collect_sensor_status() -> Dict[str, Any]:
                         'imu': 'IMU',
                         'thruster': 'Arduino',
                         'battery': 'Battery',
+                        'pi5_sensors': 'Pi5 Sensors',
                     }
                     display_name = sensor_display_names.get(name, name)
                     if 'connected' in summary['status']:

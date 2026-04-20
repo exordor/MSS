@@ -9,6 +9,7 @@ from .camera import CameraDiagnostic
 from .imu import IMUDiagnostic
 from .thruster import ThrusterDiagnostic
 from .battery import BatteryDiagnostic
+from .pi5_sensors import Pi5SensorsDiagnostic
 
 __all__ = [
     'NaviLidarDiagnostic',
@@ -17,4 +18,5 @@ __all__ = [
     'IMUDiagnostic',
     'ThrusterDiagnostic',
     'BatteryDiagnostic',
+    'Pi5SensorsDiagnostic',
 ]

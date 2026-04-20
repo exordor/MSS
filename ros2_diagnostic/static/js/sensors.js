@@ -88,6 +88,7 @@ function updateSensorsDisplay(sensorsData) {
     updateImuPanel(allSensors.imu);
     updateThrusterPanel(allSensors.thruster);
     updateBatteryPanel(allSensors.battery);
+    updatePi5SensorsPanel(allSensors.pi5_sensors);
 }
 
 function updateNaviLidarPanel(data) {
@@ -395,4 +396,75 @@ function updateBatteryPanel(data) {
         a3El.textContent = '-- V';
         a3El.className = 'info-value';
     }
+}
+
+function updatePi5SensorsPanel(data) {
+    if (!data) return;
+
+    const badge = document.getElementById('pi5SensorsStatusBadge');
+    if (badge) {
+        badge.className = 'status-badge large ' + (data.status || 'unknown');
+        badge.textContent = (data.status || 'unknown').toUpperCase();
+    }
+
+    const connected = data.connected;
+    const netEl = document.getElementById('pi5NetworkStatus');
+    if (netEl) {
+        netEl.textContent = connected === 'Connected' ? 'Online' : 'Offline';
+        netEl.className = 'info-value ' + (connected === 'Connected' ? 'text-success' : 'text-danger');
+    }
+
+    const ageEl = document.getElementById('pi5DataAge');
+    if (ageEl) {
+        const wq = data.water_quality || {};
+        const hasData = wq && Object.keys(wq).length > 0;
+        if (hasData) {
+            ageEl.textContent = 'Active';
+            ageEl.className = 'info-value text-success';
+        } else {
+            ageEl.textContent = 'No data';
+            ageEl.className = 'info-value';
+        }
+    }
+
+    // Water quality
+    const wq = data.water_quality || {};
+    setInfoValue('pi5C4eTemp', wq.c4e_temp_c, ' °C');
+    setInfoValue('pi5Conductivity', wq.c4e_conductivity_uscm, ' µS/cm');
+    setInfoValue('pi5Salinity', wq.c4e_salinity_ppt, ' ppt');
+    setInfoValue('pi5Tds', wq.c4e_tds_ppm, ' ppm');
+    setInfoValue('pi5OptodTemp', wq.optod_temp_c, ' °C');
+    setInfoValue('pi5O2Sat', wq.optod_o2_saturation_pct, ' %');
+    setInfoValue('pi5O2Mgl', wq.optod_o2_mgl, ' mg/L');
+    setInfoValue('pi5PhTemp', wq.ph_temp_c, ' °C');
+    setInfoValue('pi5Ph', wq.ph_ph, '');
+    setInfoValue('pi5Redox', wq.ph_redox_mv, ' mV');
+
+    // UPS status
+    const ups = data.ups || {};
+    setInfoText('pi5UpsComponent', ups.component);
+    setInfoText('pi5UpsParameter', ups.parameter);
+    if (ups.value !== undefined && ups.value !== null) {
+        setInfoValue('pi5UpsValue', ups.value, '');
+    }
+    setInfoText('pi5UpsState', ups.state);
+}
+
+function setInfoValue(id, value, suffix) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (value !== undefined && value !== null) {
+        el.textContent = (typeof value === 'number' ? value.toFixed(2) : value) + suffix;
+        el.className = 'info-value';
+    } else {
+        el.textContent = '--' + suffix;
+        el.className = 'info-value';
+    }
+}
+
+function setInfoText(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = (value && value !== '') ? value : '--';
+    el.className = 'info-value';
 }

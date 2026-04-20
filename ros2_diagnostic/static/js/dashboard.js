@@ -11,6 +11,7 @@ const SENSOR_INFO = {
     imu: { name: 'IMU', icon: 'fa-compass', nodePatterns: ['sbg', 'imu', 'ekf'] },
     thruster: { name: 'Arduino', icon: 'fa-microchip', nodePatterns: ['thruster', 'pwm', 'motor'] },
     battery: { name: 'Battery', icon: 'fa-battery-half', nodePatterns: ['battery', 'ads1115'] },
+    pi5_sensors: { name: 'Pi5 Sensors', icon: 'fa-water', nodePatterns: [] },
 };
 
 // Sensor update tracking
@@ -38,7 +39,7 @@ function initSensorsTable() {
     const tableBody = document.getElementById('sensorsTableBody');
     if (!tableBody) return;
 
-    const sensors = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery'];
+    const sensors = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery', 'pi5_sensors'];
     let html = '';
     for (const sensor of sensors) {
         const info = SENSOR_INFO[sensor];
@@ -354,15 +355,18 @@ function updateArduinoSummaryCard(sensors) {
     const primaryEl = document.getElementById('arduinoSummaryPrimary');
     const secondaryEl = document.getElementById('arduinoSummarySecondary');
     const batteryEl = document.getElementById('arduinoSummaryBattery');
+    const pi5El = document.getElementById('arduinoSummaryPi5');
     const updatedEl = document.getElementById('arduinoSummaryUpdated');
     if (!primaryEl || !secondaryEl || !batteryEl || !updatedEl) return;
 
     const arduino = sensors && sensors.thruster;
     const battery = sensors && sensors.battery;
+    const pi5 = sensors && sensors.pi5_sensors;
     const tempHumidity = arduino && arduino.temp_humidity ? arduino.temp_humidity : {};
     const statusData = arduino && arduino.thruster_status ? arduino.thruster_status : {};
     const flowData = arduino && arduino.flow_data ? arduino.flow_data : {};
     const voltages = battery && battery.voltages ? battery.voltages : {};
+    const wq = pi5 && pi5.water_quality ? pi5.water_quality : {};
 
     const primaryParts = [];
     if (tempHumidity.temp1 !== null && tempHumidity.temp1 !== undefined &&
@@ -394,6 +398,12 @@ function updateArduinoSummaryCard(sensors) {
         }
     });
     batteryEl.textContent = batteryParts.length > 0 ? `Battery: ${batteryParts.join(' | ')}` : 'Battery: --';
+
+    const pi5Parts = [];
+    if (wq.ph_ph !== undefined && wq.ph_ph !== null) pi5Parts.push(`pH: ${wq.ph_ph.toFixed(2)}`);
+    if (wq.optod_o2_mgl !== undefined && wq.optod_o2_mgl !== null) pi5Parts.push(`O2: ${wq.optod_o2_mgl.toFixed(2)} mg/L`);
+    if (wq.c4e_conductivity_uscm !== undefined && wq.c4e_conductivity_uscm !== null) pi5Parts.push(`Cond: ${wq.c4e_conductivity_uscm.toFixed(1)} µS/cm`);
+    if (pi5El) pi5El.textContent = pi5Parts.length > 0 ? `Pi5: ${pi5Parts.join(' | ')}` : 'Pi5: --';
 
     updatedEl.textContent = arduino && arduino.data_updated_at
         ? `Updated: ${formatArduinoTimestamp(arduino.data_updated_at)}`

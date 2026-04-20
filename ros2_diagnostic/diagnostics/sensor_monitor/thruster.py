@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional, List
 from ..base import BaseDiagnostic, DiagnosticResult, StatusLevel
 from ..utils import ping_host
 from ..ros2_helper import get_ros2_helper, RCLPY_AVAILABLE
+from ..mqtt_client import MqttClient, MQTT_AVAILABLE
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,10 @@ class ThrusterDiagnostic(BaseDiagnostic):
 
         # Initialize UDP listener
         self._init_udp_listener()
+
+        # Initialize MQTT listener (complements UDP)
+        self._mqtt_config = config.get('MQTT', {})
+        self._init_mqtt_listener()
 
     def _init_udp_listener(self):
         """Initialize UDP socket listener for heartbeat detection
@@ -202,6 +207,102 @@ class ThrusterDiagnostic(BaseDiagnostic):
             except Exception:
                 pass
             self._udp_socket = None
+
+    def _init_mqtt_listener(self):
+        """Register MQTT callbacks for Arduino telemetry topics."""
+        if not MQTT_AVAILABLE or not self._mqtt_config.get('enabled'):
+            return
+
+        topics = self._mqtt_config.get('arduino_topics', {})
+        if not topics:
+            return
+
+        mqtt_client = MqttClient.get_instance()
+        broker_host = self._mqtt_config.get('broker_host', '192.168.50.200')
+        broker_port = self._mqtt_config.get('broker_port', 1883)
+        client_id = self._mqtt_config.get('client_id', 'ros2_diagnostic')
+
+        if not mqtt_client.connect(broker_host, broker_port, client_id):
+            logger.warning("Thruster MQTT connection failed")
+            return
+
+        topic_map = {
+            'thruster_status': self._on_mqtt_thruster_status,
+            'flow_status': self._on_mqtt_flow_status,
+            'dht_status': self._on_mqtt_dht_status,
+            'system_online': self._on_mqtt_system_online,
+        }
+
+        for key, callback in topic_map.items():
+            topic = topics.get(key)
+            if topic:
+                mqtt_client.subscribe(topic, callback)
+                logger.info(f"Thruster MQTT subscribed: {topic}")
+
+    def _on_mqtt_thruster_status(self, topic: str, payload):
+        """Handle arduino/thruster/status MQTT message."""
+        try:
+            now = time.time()
+            with self._udp_lock:
+                self._last_udp_receive = now
+                mode_label = payload.get('mode', 'rc')
+                mode = 1 if mode_label == 'mqtt' else 0
+                self._latest_thruster_status = {
+                    'mode': mode,
+                    'mode_label': mode_label.title() if isinstance(mode_label, str) else str(mode_label),
+                    'left_pwm': payload.get('left_us', 1500),
+                    'right_pwm': payload.get('right_us', 1500),
+                }
+                self._last_thruster_status_time = now
+        except Exception as e:
+            logger.debug(f"MQTT thruster status parse error: {e}")
+
+    def _on_mqtt_flow_status(self, topic: str, payload):
+        """Handle arduino/flow/status MQTT message."""
+        try:
+            now = time.time()
+            with self._udp_lock:
+                self._last_udp_receive = now
+                self._latest_flow_data = {
+                    'freq_hz': payload.get('freq_hz', 0),
+                    'flow_lmin': payload.get('flow_lmin', 0),
+                    'velocity_ms': payload.get('velocity_ms', 0),
+                    'total_liters': payload.get('total_liters', 0),
+                }
+                self._last_flow_data_time = now
+        except Exception as e:
+            logger.debug(f"MQTT flow status parse error: {e}")
+
+    def _on_mqtt_dht_status(self, topic: str, payload):
+        """Handle arduino/dht/status MQTT message."""
+        try:
+            now = time.time()
+            with self._udp_lock:
+                self._last_udp_receive = now
+                s1 = payload.get('sensor_1', {})
+                s2 = payload.get('sensor_2', {})
+                self._latest_temp_humidity = {
+                    'temp1': s1.get('temp_c'),
+                    'humidity1': s1.get('hum_pct'),
+                    'temp2': s2.get('temp_c'),
+                    'humidity2': s2.get('hum_pct'),
+                }
+                self._last_temp_humidity_time = now
+        except Exception as e:
+            logger.debug(f"MQTT DHT status parse error: {e}")
+
+    def _on_mqtt_system_online(self, topic: str, payload):
+        """Handle arduino/system/online MQTT message."""
+        try:
+            state = payload.get('state', '')
+            if state == 'online':
+                with self._udp_lock:
+                    self._last_udp_receive = time.time()
+                logger.info("Arduino MQTT system online")
+            elif state == 'offline':
+                logger.warning("Arduino MQTT system offline (last will)")
+        except Exception as e:
+            logger.debug(f"MQTT system online parse error: {e}")
 
     def _parse_temp_humidity(self, data_str: str):
         """Parse temperature & humidity from D message

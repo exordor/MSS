@@ -16,6 +16,9 @@ PyYAML>=6.0
 # HTTP Requests
 requests>=2.28.0
 
+# MQTT Client
+paho-mqtt>=1.6.0
+
 # ROS2 Client Library (optional - for direct DDS monitoring)
 # Note: rclpy is typically installed with ROS2. If not available:
 # sudo apt install ros-humble-rclpy
