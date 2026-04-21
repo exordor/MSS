@@ -7,6 +7,7 @@ import argparse
 import json
 import sys
 import time
+import random
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -63,7 +64,50 @@ def build_measurements_payload(sequence: int) -> dict:
     payload["measurement_id"] = sequence
     payload["elapsed_s"] = round(MEASUREMENTS_PAYLOAD["elapsed_s"] + sequence * 30.0, 2)
     payload["timestamp_utc"] = datetime.now(timezone.utc).isoformat()
+    # Simulate drifting sensor values
+    drift = sequence * 0.1
+    r = payload["results"]
+    r["C4E_Leitfaehigkeit"]["Temperatur_C"] = round(
+        18.5 + drift * random.uniform(0.8, 1.2) + random.gauss(0, 0.05), 3
+    )
+    r["C4E_Leitfaehigkeit"]["Leitfaehigkeit_uScm"] = round(
+        0.1 + drift * random.uniform(0.5, 1.5) + random.gauss(0, 0.01), 4
+    )
+    r["C4E_Leitfaehigkeit"]["TDS_ppm"] = round(
+        r["C4E_Leitfaehigkeit"]["Leitfaehigkeit_uScm"] * 0.5, 4
+    )
+    r["OPTOD_Sauerstoff"]["Temperatur_C"] = round(
+        18.8 + drift * random.uniform(0.8, 1.2) + random.gauss(0, 0.05), 3
+    )
+    r["OPTOD_Sauerstoff"]["O2_Saettigung_pct"] = round(
+        max(0.0, 85.0 + random.gauss(0, 2.0)), 1
+    )
+    r["OPTOD_Sauerstoff"]["O2_mgL"] = round(
+        max(0.0, 8.5 + random.gauss(0, 0.3)), 2
+    )
+    r["OPTOD_Sauerstoff"]["O2_ppm"] = r["OPTOD_Sauerstoff"]["O2_mgL"]
+    r["pH_Redox"]["Temperatur_C"] = round(
+        18.9 + drift * random.uniform(0.8, 1.2) + random.gauss(0, 0.05), 3
+    )
+    r["pH_Redox"]["pH"] = round(
+        8.3 + random.gauss(0, 0.05), 3
+    )
+    r["pH_Redox"]["Redox_mV"] = round(
+        -4.0 + random.gauss(0, 1.0), 3
+    )
+    r["pH_Redox"]["pH_mV"] = round(
+        -67.0 + random.gauss(0, 0.5), 3
+    )
     return payload
+
+
+def build_ups_payload() -> dict:
+    return {
+        "component": "pi5_ups",
+        "parameter": "battery_voltage",
+        "value": round(12.4 + random.gauss(0, 0.1), 2),
+        "state": "ok",
+    }
 
 
 def publish(topic: str, payload: dict, client: mqtt.Client):
@@ -77,8 +121,8 @@ def main():
     parser = argparse.ArgumentParser(description="Publish mock Pi5 MQTT messages")
     parser.add_argument("--host", default=MQTT_CONFIG.get("broker_host", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(MQTT_CONFIG.get("broker_port", 1883)))
-    parser.add_argument("--count", type=int, default=1, help="Number of measurement messages to publish")
-    parser.add_argument("--interval", type=float, default=1.0, help="Seconds between publishes")
+    parser.add_argument("--count", type=int, default=0, help="Number of messages to publish (0 = infinite)")
+    parser.add_argument("--interval", type=float, default=3.0, help="Seconds between publishes")
     parser.add_argument("--with-ups", action="store_true", help="Also publish one UPS status message")
     args = parser.parse_args()
 
@@ -99,12 +143,17 @@ def main():
 
     try:
         if args.with_ups:
-            publish(ups_topic, UPS_PAYLOAD, client)
+            publish(ups_topic, build_ups_payload(), client)
 
-        for idx in range(args.count):
-            publish(measurements_topic, build_measurements_payload(idx + 1), client)
-            if idx < args.count - 1:
-                time.sleep(args.interval)
+        idx = 0
+        while True:
+            idx += 1
+            publish(measurements_topic, build_measurements_payload(idx), client)
+            if args.with_ups and idx % 5 == 0:
+                publish(ups_topic, build_ups_payload(), client)
+            if args.count and idx >= args.count:
+                break
+            time.sleep(args.interval)
     finally:
         client.loop_stop()
         client.disconnect()
