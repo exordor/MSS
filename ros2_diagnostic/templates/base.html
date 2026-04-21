@@ -125,6 +125,12 @@
     });
     </script>
 
+    {% if frontend_sensor_defs_json %}
+    <script>
+    window.__SENSOR_DEFS__ = {{ frontend_sensor_defs_json | safe }};
+    </script>
+    {% endif %}
+
     {% block extra_scripts %}{% endblock %}
 </body>
 </html>

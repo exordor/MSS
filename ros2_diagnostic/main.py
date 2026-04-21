@@ -37,7 +37,7 @@ from config import (
     TOOLS_CONFIG_FILES, TOOLS_SCRIPTS, EVENT_LOG_CONFIG, SENSOR_I2C, TIME_CONFIG,
     MQTT_CONFIG
 )
-from diagnostics import ROS2Monitor, ROS2Controller
+from diagnostics import ROS2Monitor, ROS2Controller, get_ros2_helper
 from diagnostics.rosbag_controller import get_rosbag_controller
 from diagnostics.sensor_monitor import (
     NaviLidarDiagnostic, UliLidarDiagnostic,
@@ -60,6 +60,93 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+SENSOR_DEFS = {
+    'navi_lidar': {
+        'display_name': 'Navi LiDAR',
+        'icon': 'fa-radar',
+        'show_node_topic': True,
+        'promote_with_ros2': True,
+        'topic_metric_field': 'points_available',
+        'topic_exact': '/navi_lidar/points',
+        'topic_patterns': ['points', 'hesai'],
+        'node_patterns': ['navi_lidar_driver', 'hesai', 'lidar'],
+    },
+    'uli_lidar': {
+        'display_name': 'U-LiDAR',
+        'icon': 'fa-satellite-dish',
+        'show_node_topic': False,
+        'promote_with_ros2': False,
+        'topic_metric_field': 'points_available',
+        'topic_exact': '/uli_lidar/points',
+        'topic_patterns': ['points', 'uli'],
+        'node_patterns': ['uli', 'lidar'],
+    },
+    'camera': {
+        'display_name': 'Camera',
+        'icon': 'fa-camera',
+        'show_node_topic': True,
+        'promote_with_ros2': True,
+        'topic_metric_field': 'image_available',
+        'topic_exact': '/image_raw',
+        'topic_patterns': ['image_raw', 'camera'],
+        'node_patterns': ['galaxy_camera', 'camera'],
+    },
+    'imu': {
+        'display_name': 'IMU',
+        'icon': 'fa-compass',
+        'show_node_topic': True,
+        'promote_with_ros2': True,
+        'topic_metric_field': 'data_available',
+        'topic_exact': '/imu/data',
+        'topic_patterns': ['imu/data', 'sbg'],
+        'node_patterns': ['sbg_device', 'imu'],
+    },
+    'thruster': {
+        'display_name': 'Arduino',
+        'icon': 'fa-microchip',
+        'show_node_topic': True,
+        'promote_with_ros2': True,
+        'topic_metric_field': 'status_available',
+        'topic_exact': '/thruster_status_pwm',
+        'topic_patterns': ['thruster_status', 'thruster'],
+        'node_patterns': ['thruster_wifi_node', 'thruster'],
+    },
+    'battery': {
+        'display_name': 'Battery',
+        'icon': 'fa-battery-half',
+        'show_node_topic': True,
+        'promote_with_ros2': False,
+        'topic_metric_field': 'data_available',
+        'topic_exact': '/battery_voltage',
+        'topic_patterns': ['battery_voltage', 'battery'],
+        'node_patterns': ['battery_monitor', 'battery'],
+    },
+    'pi5_sensors': {
+        'display_name': 'Pi5 Sensors',
+        'icon': 'fa-water',
+        'show_node_topic': True,
+        'promote_with_ros2': False,
+        'topic_exact': '/water_quality',
+        'topic_patterns': ['water_quality'],
+        'node_patterns': ['thruster_wifi_node', 'thruster'],
+    },
+}
+SENSOR_NAMES = list(SENSOR_DEFS.keys())
+
+
+def _build_frontend_sensor_catalog() -> Dict[str, Dict[str, Any]]:
+    """Serialize backend sensor definitions into the frontend catalog shape."""
+    return {
+        sensor_name: {
+            'name': sensor_def.get('display_name', sensor_name),
+            'icon': sensor_def.get('icon', 'fa-microchip'),
+            'showNodeTopic': bool(sensor_def.get('show_node_topic', False)),
+            'nodePatterns': list(sensor_def.get('node_patterns', [])),
+            'topicPatterns': list(sensor_def.get('topic_patterns', [])),
+        }
+        for sensor_name, sensor_def in SENSOR_DEFS.items()
+    }
 
 # =============================================================================
 # Global state (thread-safe)
@@ -869,159 +956,151 @@ def collect_sensor_status_cached() -> Dict[str, Any]:
     return result
 
 
+def _error_sensor_result(error: Any) -> Dict[str, Any]:
+    """Build a consistent error payload for sensor checks."""
+    return {
+        'status': 'unknown',
+        'color': '#6b7280',
+        'value': 'N/A',
+        'message': str(error),
+        'connected': '--',
+    }
+
+
+def _build_sensor_result(sensor_name: str) -> Dict[str, Any]:
+    """Build the normalized frontend payload for a single sensor."""
+    sensor_def = _get_sensor_def(sensor_name)
+    monitor = get_monitor(sensor_name)
+    check_result = monitor.check()
+    summary = monitor.get_diagnostic_summary()
+
+    metrics = check_result.metrics or {}
+    frequency = None
+    packet_loss = None
+    latency_ms = None
+    connected = '--'
+    gps_fix = None
+    satellites = None
+
+    if sensor_name in ['navi_lidar', 'uli_lidar']:
+        log_data = metrics.get('log_data', {})
+        freq_value = log_data.get('measured_frequency')
+        if freq_value is not None:
+            frequency = f"{freq_value:.1f} Hz"
+        network = metrics.get('network', {})
+        connected = 'Connected' if network.get('reachable') else 'Disconnected'
+    elif sensor_name == 'camera':
+        log_data = metrics.get('log_data', {})
+        fps_value = log_data.get('measured_frequency')
+        if fps_value is not None:
+            frequency = f"{fps_value:.1f} fps"
+        latency_value = log_data.get('avg_processing_ms')
+        if latency_value is not None:
+            packet_loss = f"{latency_value:.1f} ms"
+        network = metrics.get('network', {})
+        connected = 'Connected' if network.get('reachable') else 'Disconnected'
+    elif sensor_name == 'imu':
+        log_data = metrics.get('log_data', {})
+        freq_value = log_data.get('measured_frequency')
+        if freq_value is not None:
+            frequency = f"{freq_value:.1f} Hz"
+        gps = metrics.get('gps', {})
+        gps_fix = gps.get('fix_status')
+        satellites = gps.get('satellites')
+        connected = 'Connected' if metrics.get('serial', {}).get('connected') else 'Disconnected'
+    elif sensor_name == 'thruster':
+        # Arduino uses UDP for commands, ping, and telemetry.
+        network = metrics.get('network', {})
+        connected = 'Connected' if network.get('reachable', False) else 'Disconnected'
+        latency_ms = network.get('latency_ms')
+        packet_loss = network.get('packet_loss', 0)
+    elif sensor_name == 'battery':
+        i2c = metrics.get('i2c', {})
+        if i2c.get('connected') is True:
+            connected = 'Connected'
+        elif i2c.get('connected') is False:
+            connected = 'Disconnected'
+        else:
+            connected = '--'
+    elif sensor_name == 'pi5_sensors':
+        connected = 'Connected' if metrics.get('reachable') else 'Disconnected'
+
+    topic_available = _get_topic_available(metrics, sensor_name)
+    node_available = _get_node_available(sensor_name)
+
+    final_status = summary['status']
+    final_color = summary['color']
+    final_message = summary.get('message', '')
+
+    physical_connected = connected == 'Connected'
+    if not physical_connected and connected == 'Disconnected':
+        final_status = 'disconnected'
+        final_color = 'red'
+        final_message = summary.get('message', '') or 'Sensor disconnected'
+
+    # Only promote status when physical connectivity is confirmed.
+    # battery and pi5_sensors still report node/topic availability separately.
+    if sensor_def.get('promote_with_ros2') and node_available is not None:
+        if physical_connected and node_available and topic_available:
+            final_status = 'ok'
+            final_color = 'green'
+            display_name = sensor_def.get('display_name', sensor_name)
+            if 'connected' in summary['status']:
+                final_message = f"{display_name} - OK (node and topic active)"
+        elif physical_connected and node_available and not topic_available:
+            final_status = 'connected'
+            final_color = 'blue'
+
+    payload = {
+        'status': final_status,
+        'color': final_color,
+        'value': summary.get('value', 'N/A'),
+        'message': final_message,
+        'frequency': frequency,
+        'packet_loss': packet_loss,
+        'latency_ms': latency_ms,
+        'connected': connected,
+        'gps_fix': gps_fix,
+        'satellites': satellites,
+        'topic_available': topic_available,
+        'node_available': node_available,
+    }
+
+    if sensor_name == 'thruster':
+        if 'temp_humidity' in summary:
+            payload['temp_humidity'] = summary['temp_humidity']
+        if 'thruster_status' in summary:
+            payload['thruster_status'] = summary['thruster_status']
+        if 'flow_data' in summary:
+            payload['flow_data'] = summary['flow_data']
+        if 'data_updated_at' in summary:
+            payload['data_updated_at'] = summary['data_updated_at']
+        if 'connection_info' in summary:
+            payload['connection_info'] = summary['connection_info']
+    elif sensor_name == 'battery':
+        if 'voltages' in summary:
+            payload['voltages'] = summary['voltages']
+    elif sensor_name == 'pi5_sensors':
+        _attach_pi5_fields(payload, metrics, summary)
+
+        logger.info(
+            "[PI5_DEBUG] _check_single_sensor summary_keys=%s result_status=%s has_wq=%s has_ups=%s",
+            sorted(summary.keys()),
+            payload.get('status'),
+            bool(payload.get('water_quality')),
+            bool(payload.get('ups')),
+        )
+
+    return payload
+
+
 def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
-    """Check a single sensor and return formatted result (internal, for parallel execution)."""
+    """Check a single sensor and return the normalized frontend payload."""
     try:
-        monitor = get_monitor(sensor_name)
-        result = monitor.check()
-        summary = monitor.get_diagnostic_summary()
-
-        metrics = result.metrics or {}
-        frequency = None
-        packet_loss = None
-        latency_ms = None
-        connected = '--'
-        gps_fix = None
-        satellites = None
-        topic_available = None
-        node_available = None
-
-        if sensor_name in ['navi_lidar', 'uli_lidar']:
-            log_data = metrics.get('log_data', {})
-            freq_value = log_data.get('measured_frequency')
-            if freq_value is not None:
-                frequency = f"{freq_value:.1f} Hz"
-            network = metrics.get('network', {})
-            connected = 'Connected' if network.get('reachable') else 'Disconnected'
-        elif sensor_name == 'camera':
-            log_data = metrics.get('log_data', {})
-            fps_value = log_data.get('measured_frequency')
-            if fps_value is not None:
-                frequency = f"{fps_value:.1f} fps"
-            latency_value = log_data.get('avg_processing_ms')
-            if latency_value is not None:
-                packet_loss = f"{latency_value:.1f} ms"
-            network = metrics.get('network', {})
-            connected = 'Connected' if network.get('reachable') else 'Disconnected'
-        elif sensor_name == 'imu':
-            log_data = metrics.get('log_data', {})
-            freq_value = log_data.get('measured_frequency')
-            if freq_value is not None:
-                frequency = f"{freq_value:.1f} Hz"
-            gps = metrics.get('gps', {})
-            gps_fix = gps.get('fix_status')
-            satellites = gps.get('satellites')
-            connected = 'Connected' if metrics.get('serial', {}).get('connected') else 'Disconnected'
-        elif sensor_name == 'thruster':
-            # Arduino uses UDP for commands, ping, and telemetry.
-            network = metrics.get('network', {})
-            connected = 'Connected' if network.get('reachable', False) else 'Disconnected'
-            latency_ms = network.get('latency_ms')
-            packet_loss = network.get('packet_loss', 0)
-        elif sensor_name == 'battery':
-            i2c = metrics.get('i2c', {})
-            if i2c.get('connected') is True:
-                connected = 'Connected'
-            elif i2c.get('connected') is False:
-                connected = 'Disconnected'
-            else:
-                connected = '--'
-        elif sensor_name == 'pi5_sensors':
-            connected = 'Connected' if metrics.get('reachable') else 'Disconnected'
-
-        # Extract topic and node availability using helper functions
-        # This ensures consistent detection across all code paths
-        topic_available = _get_topic_available(metrics, sensor_name)
-        node_available = _get_node_available(sensor_name)
-
-        # Calculate final status based on node/topic availability
-        # Skip uli_lidar (no ROS driver)
-        final_status = summary['status']
-        final_color = summary['color']
-        final_message = summary.get('message', '')
-
-        physical_connected = (connected == 'Connected')
-        if not physical_connected and connected == 'Disconnected':
-            final_status = 'disconnected'
-            final_color = 'red'
-            final_message = summary.get('message', '') or 'Sensor disconnected'
-
-        # Only promote status when physical connectivity is confirmed.
-        # battery and pi5_sensors still report node/topic availability separately.
-        if sensor_name not in ['uli_lidar', 'battery', 'pi5_sensors'] and node_available is not None:
-            if physical_connected and node_available and topic_available:
-                # Both node and topic available - status is OK
-                final_status = 'ok'
-                final_color = 'green'
-                # Update message to reflect full status
-                sensor_display_names = {
-                    'navi_lidar': 'Navi LiDAR',
-                    'uli_lidar': 'U-LiDAR',
-                    'camera': 'Camera',
-                    'imu': 'IMU',
-                    'thruster': 'Arduino',
-                    'pi5_sensors': 'Pi5 Sensors',
-                }
-                display_name = sensor_display_names.get(sensor_name, sensor_name)
-                if 'connected' in summary['status']:
-                    final_message = f"{display_name} - OK (node and topic active)"
-            elif physical_connected and node_available and not topic_available:
-                # Node running but no topic data (only if physically connected)
-                final_status = 'connected'
-                final_color = 'blue'
-
-        # Build final result
-        result = {
-            'status': final_status,
-            'color': final_color,
-            'value': summary.get('value', 'N/A'),
-            'message': final_message,
-            'frequency': frequency,
-            'packet_loss': packet_loss,
-            'latency_ms': latency_ms,
-            'connected': connected,
-            'gps_fix': gps_fix,
-            'satellites': satellites,
-            'topic_available': topic_available,
-            'node_available': node_available,
-        }
-        
-        # Add additional thruster telemetry fields
-        if sensor_name == 'thruster':
-            if 'temp_humidity' in summary:
-                result['temp_humidity'] = summary['temp_humidity']
-            if 'thruster_status' in summary:
-                result['thruster_status'] = summary['thruster_status']
-            if 'flow_data' in summary:
-                result['flow_data'] = summary['flow_data']
-            if 'data_updated_at' in summary:
-                result['data_updated_at'] = summary['data_updated_at']
-            if 'connection_info' in summary:
-                result['connection_info'] = summary['connection_info']
-        elif sensor_name == 'battery':
-            if 'voltages' in summary:
-                result['voltages'] = summary['voltages']
-        elif sensor_name == 'pi5_sensors':
-            _attach_pi5_fields(result, metrics, summary)
-
-            logger.info(
-                "[PI5_DEBUG] _check_single_sensor summary_keys=%s result_status=%s has_wq=%s has_ups=%s",
-                sorted(summary.keys()),
-                result.get('status'),
-                bool(result.get('water_quality')),
-                bool(result.get('ups')),
-            )
-
-        return result
+        return _build_sensor_result(sensor_name)
     except Exception as e:
         logger.debug(f"Error checking {sensor_name}: {e}")
-        return {
-            'status': 'unknown',
-            'color': '#6b7280',
-            'value': 'N/A',
-            'message': str(e),
-            'connected': '--',
-        }
+        return _error_sensor_result(e)
 
 async def check_sensor_async(sensor_name: str) -> Dict[str, Any]:
     """Async wrapper for sensor check using thread pool executor."""
@@ -1031,45 +1110,20 @@ async def check_sensor_async(sensor_name: str) -> Dict[str, Any]:
 
 async def collect_sensor_status_parallel() -> Dict[str, Any]:
     """Collect sensor status in parallel using asyncio."""
-    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery', 'pi5_sensors']
-
     # Run all sensor checks in parallel
-    tasks = [check_sensor_async(name) for name in sensor_names]
+    tasks = [check_sensor_async(name) for name in SENSOR_NAMES]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Combine results
     sensors = {}
-    for name, result in zip(sensor_names, results):
+    for name, result in zip(SENSOR_NAMES, results):
         if isinstance(result, Exception):
             logger.debug(f"Error collecting {name}: {result}")
-            sensors[name] = {
-                'status': 'unknown',
-                'color': '#6b7280',
-                'value': 'N/A',
-                'message': str(result),
-                'connected': '--',
-            }
+            sensors[name] = _error_sensor_result(result)
         else:
             sensors[name] = result
 
-    # Calculate overall status
-    statuses = [s['status'] for s in sensors.values()]
-    if 'critical' in statuses:
-        overall = 'critical'
-    elif 'warning' in statuses:
-        overall = 'warning'
-    elif 'unknown' in statuses:
-        overall = 'unknown'
-    else:
-        overall = 'ok'
-
-    ok_count = sum(1 for s in sensors.values() if s['status'] == 'ok')
-
-    result = {
-        'sensors': sensors,
-        'overall': overall,
-        'summary': f"{ok_count}/{len(sensors)} OK",
-    }
+    result = _summarize_sensor_results(sensors)
 
     # Update cache so that send_full_state can use it
     _cache_set('sensors:status', result)
@@ -1101,28 +1155,20 @@ def _summarize_sensor_results(sensors: Dict[str, Any]) -> Dict[str, Any]:
 
 async def _broadcast_sensors_incremental() -> Dict[str, Any]:
     """Broadcast sensor updates incrementally as each check completes."""
-    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery', 'pi5_sensors']
-
     async def _run_sensor_check(name: str):
         try:
             return name, await check_sensor_async(name)
         except Exception as e:
             return name, e
 
-    tasks = [asyncio.create_task(_run_sensor_check(name)) for name in sensor_names]
+    tasks = [asyncio.create_task(_run_sensor_check(name)) for name in SENSOR_NAMES]
     sensors: Dict[str, Any] = {}
 
     for task in asyncio.as_completed(tasks):
         name, result = await task
         if isinstance(result, Exception):
             logger.debug(f"Error collecting {name}: {result}")
-            result = {
-                'status': 'unknown',
-                'color': '#6b7280',
-                'value': 'N/A',
-                'message': str(result),
-                'connected': '--',
-            }
+            result = _error_sensor_result(result)
 
         sensors[name] = result
 
@@ -1218,12 +1264,10 @@ def _collect_connectivity_sync(sensor_name: str) -> Dict[str, Any]:
 
 async def _broadcast_connectivity_incremental() -> None:
     """Broadcast connectivity updates incrementally."""
-    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery', 'pi5_sensors']
-
     async def _run(name: str):
         return name, await asyncio.to_thread(_collect_connectivity_sync, name)
 
-    tasks = [asyncio.create_task(_run(name)) for name in sensor_names]
+    tasks = [asyncio.create_task(_run(name)) for name in SENSOR_NAMES]
 
     for task in asyncio.as_completed(tasks):
         name, payload = await task
@@ -1263,6 +1307,30 @@ def _attach_pi5_fields(result: dict, metrics: dict, summary: dict):
     result['ups_fresh'] = metrics.get('ups_fresh')
 
 
+def _get_sensor_def(sensor_name: str) -> Dict[str, Any]:
+    """Return the sensor metadata definition for the given sensor name."""
+    return SENSOR_DEFS.get(sensor_name, {})
+
+
+def _is_ros2_running() -> Optional[bool]:
+    """Return whether the ROS2 system monitor reports ROS2 as running."""
+    try:
+        ros2_monitor = get_monitor('ros2')
+        if hasattr(ros2_monitor, 'is_system_running'):
+            return ros2_monitor.is_system_running()
+    except Exception as e:
+        logger.debug(f"[ros2] Failed to determine ROS2 running state: {e}")
+    return None
+
+
+def _matches_patterns(items: List[str], patterns: List[str]) -> bool:
+    """Return True when any item contains any configured pattern."""
+    return any(
+        any(pattern in item.lower() for pattern in patterns)
+        for item in items
+    )
+
+
 def _get_topic_available(metrics: dict, sensor_name: str) -> Optional[bool]:
     """Extract topic availability from sensor metrics.
 
@@ -1273,38 +1341,22 @@ def _get_topic_available(metrics: dict, sensor_name: str) -> Optional[bool]:
     Returns:
         True if topic is available, False if not, None if unknown
     """
-    # Specific topic names to check (more reliable than patterns)
-    exact_topics = {
-        'navi_lidar': '/navi_lidar/points',
-        'uli_lidar': '/uli_lidar/points',
-        'camera': '/image_raw',
-        'imu': '/imu/data',
-        'thruster': '/thruster_status_pwm',
-        'pi5_sensors': '/water_quality',
-    }
+    sensor_def = _get_sensor_def(sensor_name)
+    if not sensor_def:
+        return None
 
-    # Topic patterns for fallback matching
-    topic_patterns = {
-        'navi_lidar': ['points', 'hesai'],
-        'camera': ['image_raw', 'camera'],
-        'imu': ['imu/data', 'sbg'],
-        'thruster': ['thruster_status', 'thruster'],
-        'pi5_sensors': ['water_quality'],
-    }
+    exact_topic = sensor_def.get('topic_exact')
+    topic_patterns = sensor_def.get('topic_patterns', [])
+    topic_metric_field = sensor_def.get('topic_metric_field')
 
     # Method 1: Check from sensor metrics (most reliable if available)
-    topics = metrics.get('topics', {})
-    if topics:
-        topic_field_map = {
-            'navi_lidar': 'points_available',
-            'uli_lidar': 'points_available',
-            'camera': 'image_available',
-            'imu': 'data_available',
-            'thruster': 'status_available',
-        }
+    topics = metrics.get('topics')
+    if topics is None:
+        return None
 
-        if sensor_name in topic_field_map:
-            value = topics.get(topic_field_map[sensor_name])
+    if topics:
+        if topic_metric_field:
+            value = topics.get(topic_metric_field)
             if value is not None:
                 logger.debug(f"[{sensor_name}] Topic from metrics: {value}")
                 return value
@@ -1315,59 +1367,44 @@ def _get_topic_available(metrics: dict, sensor_name: str) -> Optional[bool]:
                 logger.debug(f"[{sensor_name}] Topic from metrics field {key}: {value}")
                 return value
 
+    ros2_running = _is_ros2_running()
+    if ros2_running is False:
+        return None
+    if ros2_running is not True and not topics:
+        return None
+
     # Method 2: Use ROS2Monitor._check_topics() result
     try:
-        from diagnostics import ROS2Monitor
-        ros2_monitor = ROS2Monitor({
-            'ROS2_CONFIG': ROS2_CONFIG,
-            'EXPECTED_NODES': EXPECTED_NODES,
-            'IGNORED_NODES': IGNORED_NODES,
-        })
+        ros2_monitor = get_monitor('ros2')
         check_result = ros2_monitor._check_topics()
         topics = check_result.get('metrics', {}).get('all', [])
-        if topics and sensor_name in exact_topics:
-            exact = exact_topics[sensor_name]
-            if exact in topics:
-                logger.debug(f"[{sensor_name}] Topic found via ROS2Monitor: {exact}")
-                return True
+        if topics and exact_topic and exact_topic in topics:
+            logger.debug(f"[{sensor_name}] Topic found via ROS2Monitor: {exact_topic}")
+            return True
         # Pattern matching
-        if topics and sensor_name in topic_patterns:
-            patterns = topic_patterns[sensor_name]
-            for topic in topics:
-                if any(pattern in topic.lower() for pattern in patterns):
-                    logger.debug(f"[{sensor_name}] Topic pattern found: {topic}")
-                    return True
+        if topics and topic_patterns and _matches_patterns(topics, topic_patterns):
+            logger.debug(f"[{sensor_name}] Topic pattern found via ROS2Monitor")
+            return True
     except Exception as e:
         logger.debug(f"[{sensor_name}] ROS2Monitor topic check failed: {e}")
 
     # Method 3: Use rclpy helper from ROS2Monitor
     try:
-        from diagnostics import ROS2Monitor
-        ros2_monitor = ROS2Monitor({
-            'ROS2_CONFIG': ROS2_CONFIG,
-            'EXPECTED_NODES': EXPECTED_NODES,
-            'IGNORED_NODES': IGNORED_NODES,
-        })
-        helper = ros2_monitor._get_helper()
+        helper = get_ros2_helper(_get_domain_id())
         if helper and helper.is_ready():
             topics_with_types = helper.get_topic_names_and_types()
             topic_names = [t[0] for t in topics_with_types]
-            if sensor_name in exact_topics:
-                exact = exact_topics[sensor_name]
-                if exact in topic_names:
-                    logger.debug(f"[{sensor_name}] Topic found via rclpy helper: {exact}")
-                    return True
-            if sensor_name in topic_patterns:
-                patterns = topic_patterns[sensor_name]
-                for topic in topic_names:
-                    if any(pattern in topic.lower() for pattern in patterns):
-                        logger.debug(f"[{sensor_name}] Topic pattern found via helper: {topic}")
-                        return True
+            if exact_topic and exact_topic in topic_names:
+                logger.debug(f"[{sensor_name}] Topic found via rclpy helper: {exact_topic}")
+                return True
+            if topic_patterns and _matches_patterns(topic_names, topic_patterns):
+                logger.debug(f"[{sensor_name}] Topic pattern found via rclpy helper")
+                return True
     except Exception as e:
         logger.debug(f"[{sensor_name}] rclpy helper topic check failed: {e}")
 
     # Method 4: Fallback to shell command
-    if sensor_name in topic_patterns:
+    if exact_topic or topic_patterns:
         try:
             import subprocess
             shell_result = subprocess.run(
@@ -1380,24 +1417,17 @@ def _get_topic_available(metrics: dict, sensor_name: str) -> Optional[bool]:
             if shell_result.returncode == 0:
                 all_topics = [t.strip() for t in shell_result.stdout.strip().split('\n') if t.strip()]
                 # Check exact match first
-                if sensor_name in exact_topics:
-                    exact = exact_topics[sensor_name]
-                    if exact in all_topics:
-                        logger.debug(f"[{sensor_name}] Topic found via shell: {exact}")
-                        return True
+                if exact_topic and exact_topic in all_topics:
+                    logger.debug(f"[{sensor_name}] Topic found via shell: {exact_topic}")
+                    return True
                 # Then pattern matching
-                patterns = topic_patterns[sensor_name]
-                found = any(
-                    any(pattern in topic.lower() for pattern in patterns)
-                    for topic in all_topics
-                )
-                if found:
+                if topic_patterns and _matches_patterns(all_topics, topic_patterns):
                     logger.debug(f"[{sensor_name}] Topic pattern found via shell")
-                return found
+                    return True
         except Exception as e:
             logger.debug(f"[{sensor_name}] Shell topic check failed: {e}")
 
-    return None
+    return False if ros2_running is True else None
 
 
 def _get_node_available(sensor_name: str) -> Optional[bool]:
@@ -1409,19 +1439,13 @@ def _get_node_available(sensor_name: str) -> Optional[bool]:
     Returns:
         True if nodes are found, False if not, None if ROS2 not running or error
     """
-    node_patterns = {
-        'navi_lidar': ['navi_lidar_driver', 'hesai', 'lidar'],
-        'uli_lidar': ['uli', 'lidar'],
-        'camera': ['galaxy_camera', 'camera'],
-        'imu': ['sbg_device', 'imu'],
-        'thruster': ['thruster_wifi_node', 'thruster'],
-        'pi5_sensors': ['thruster_wifi_node', 'thruster'],
-    }
-
-    if sensor_name not in node_patterns:
+    ros2_running = _is_ros2_running()
+    if ros2_running is False:
         return None
 
-    patterns = node_patterns[sensor_name]
+    patterns = _get_sensor_def(sensor_name).get('node_patterns', [])
+    if not patterns:
+        return None
 
     # Method 1: Use shell command directly (most reliable)
     try:
@@ -1435,53 +1459,35 @@ def _get_node_available(sensor_name: str) -> Optional[bool]:
         )
         if shell_result.returncode == 0:
             nodes = [n.strip() for n in shell_result.stdout.strip().split('\n') if n.strip()]
-            found = any(
-                any(pattern in node.lower() for pattern in patterns)
-                for node in nodes
-            )
-            if found:
+            if _matches_patterns(nodes, patterns):
                 logger.debug(f"[{sensor_name}] Node found via shell: {patterns}")
-            else:
-                logger.debug(f"[{sensor_name}] No match. Nodes: {nodes[:3]}")
-            return found
+                return True
+            logger.debug(f"[{sensor_name}] No match. Nodes: {nodes[:3]}")
     except Exception as e:
         logger.debug(f"[{sensor_name}] Shell node check failed: {e}")
 
     # Method 2: Use ROS2Monitor._check_nodes() result
     try:
-        from diagnostics import ROS2Monitor
-        ros2_monitor = ROS2Monitor({
-            'ROS2_CONFIG': ROS2_CONFIG,
-            'EXPECTED_NODES': EXPECTED_NODES,
-            'IGNORED_NODES': IGNORED_NODES,
-        })
+        ros2_monitor = get_monitor('ros2')
         check_result = ros2_monitor._check_nodes()
         nodes = check_result.get('metrics', {}).get('all', [])
         if nodes:
-            for pattern in patterns:
-                if any(pattern.lower() in node.lower() for node in nodes):
-                    logger.debug(f"[{sensor_name}] Node found via ROS2Monitor: {pattern}")
-                    return True
+            if _matches_patterns(nodes, patterns):
+                logger.debug(f"[{sensor_name}] Node found via ROS2Monitor: {patterns}")
+                return True
             logger.debug(f"[{sensor_name}] ROS2Monitor nodes but no match: {nodes[:3]}")
     except Exception as e:
         logger.debug(f"[{sensor_name}] ROS2Monitor check failed: {e}")
 
     # Method 3: Use rclpy helper from ROS2Monitor
     try:
-        from diagnostics import ROS2Monitor
-        ros2_monitor = ROS2Monitor({
-            'ROS2_CONFIG': ROS2_CONFIG,
-            'EXPECTED_NODES': EXPECTED_NODES,
-            'IGNORED_NODES': IGNORED_NODES,
-        })
-        helper = ros2_monitor._get_helper()
+        helper = get_ros2_helper(_get_domain_id())
         if helper and helper.is_ready():
             nodes = helper.get_node_names()
             if nodes:
-                for pattern in patterns:
-                    if any(pattern.lower() in node.lower() for node in nodes):
-                        logger.debug(f"[{sensor_name}] Node found via rclpy helper: {pattern}")
-                        return True
+                if _matches_patterns(nodes, patterns):
+                    logger.debug(f"[{sensor_name}] Node found via rclpy helper: {patterns}")
+                    return True
                 logger.debug(f"[{sensor_name}] rclpy helper nodes: {nodes[:3]}")
     except Exception as e:
         logger.debug(f"[{sensor_name}] rclpy helper check failed: {e}")
@@ -1498,17 +1504,13 @@ def _get_node_available(sensor_name: str) -> Optional[bool]:
         )
         if shell_result.returncode == 0:
             nodes = [n.strip() for n in shell_result.stdout.strip().split('\n') if n.strip()]
-            found = any(
-                any(pattern in node.lower() for pattern in patterns)
-                for node in nodes
-            )
-            if found:
+            if _matches_patterns(nodes, patterns):
                 logger.debug(f"[{sensor_name}] Node found via shell: {patterns}")
-            return found
+                return True
     except Exception as e:
         logger.debug(f"[{sensor_name}] Shell node check failed: {e}")
 
-    return False
+    return False if ros2_running is True else None
 
 
 def _get_domain_id() -> int:
@@ -1518,158 +1520,8 @@ def _get_domain_id() -> int:
 
 def collect_sensor_status() -> Dict[str, Any]:
     """Collect status of all sensors (internal, non-cached)"""
-    sensor_names = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery', 'pi5_sensors']
-    sensors = {}
-
-    for name in sensor_names:
-        try:
-            monitor = get_monitor(name)
-            result = monitor.check()
-            summary = monitor.get_diagnostic_summary()
-
-            metrics = result.metrics or {}
-            frequency = None
-            packet_loss = None
-            latency_ms = None
-            connected = '--'
-            gps_fix = None
-            satellites = None
-            topic_available = None
-            node_available = None
-
-            if name in ['navi_lidar', 'uli_lidar']:
-                log_data = metrics.get('log_data', {})
-                freq_value = log_data.get('measured_frequency')
-                if freq_value is not None:
-                    frequency = f"{freq_value:.1f} Hz"
-                network = metrics.get('network', {})
-                connected = 'Connected' if network.get('reachable') else 'Disconnected'
-            elif name == 'camera':
-                log_data = metrics.get('log_data', {})
-                fps_value = log_data.get('measured_frequency')
-                if fps_value is not None:
-                    frequency = f"{fps_value:.1f} fps"
-                latency_value = log_data.get('avg_processing_ms')
-                if latency_value is not None:
-                    packet_loss = f"{latency_value:.1f} ms"
-                network = metrics.get('network', {})
-                connected = 'Connected' if network.get('reachable') else 'Disconnected'
-            elif name == 'imu':
-                log_data = metrics.get('log_data', {})
-                freq_value = log_data.get('measured_frequency')
-                if freq_value is not None:
-                    frequency = f"{freq_value:.1f} Hz"
-                gps = metrics.get('gps', {})
-                gps_fix = gps.get('fix_status')
-                satellites = gps.get('satellites')
-                connected = 'Connected' if metrics.get('serial', {}).get('connected') else 'Disconnected'
-            elif name == 'thruster':
-                # Arduino uses UDP for commands, ping, and telemetry.
-                network = metrics.get('network', {})
-                connected = 'Connected' if network.get('reachable', False) else 'Disconnected'
-                latency_ms = network.get('latency_ms')
-                packet_loss = network.get('packet_loss', 0)
-            elif name == 'battery':
-                # Battery uses ROS2 topic data
-                topics = metrics.get('topics', {})
-                voltages = topics.get('voltages', {})
-                connected = 'Connected' if topics.get('data_available') else 'Disconnected'
-            elif name == 'pi5_sensors':
-                connected = 'Connected' if metrics.get('reachable') else 'Disconnected'
-
-            # Extract topic and node availability for frontend display
-            topic_available = _get_topic_available(metrics, name)
-            node_available = _get_node_available(name)
-
-            # Calculate final status based on node/topic availability.
-            # pi5_sensors still checks node/topic, but does not promote status here.
-            final_status = summary['status']
-            final_color = summary['color']
-            final_message = summary.get('message', '')
-
-            if name not in ['uli_lidar', 'pi5_sensors'] and node_available is not None:
-                if node_available and topic_available:
-                    # Both node and topic available - status is OK
-                    final_status = 'ok'
-                    final_color = 'green'
-                    # Update message to reflect full status
-                    sensor_display_names = {
-                        'navi_lidar': 'Navi LiDAR',
-                        'uli_lidar': 'U-LiDAR',
-                        'camera': 'Camera',
-                        'imu': 'IMU',
-                        'thruster': 'Arduino',
-                        'battery': 'Battery',
-                        'pi5_sensors': 'Pi5 Sensors',
-                    }
-                    display_name = sensor_display_names.get(name, name)
-                    if 'connected' in summary['status']:
-                        final_message = f"{display_name} - OK (node and topic active)"
-                elif node_available and not topic_available:
-                    # Node running but no topic data
-                    final_status = 'connected'
-                    final_color = 'blue'
-                elif not node_available:
-                    # Node not running - use original status
-                    final_status = summary['status']
-                    final_color = summary['color']
-
-            sensor_result = {
-                'status': final_status,
-                'color': final_color,
-                'value': summary.get('value', 'N/A'),
-                'message': final_message,
-                'frequency': frequency,
-                'packet_loss': packet_loss,
-                'latency_ms': latency_ms,
-                'connected': connected,
-                'gps_fix': gps_fix,
-                'satellites': satellites,
-                'topic_available': topic_available,
-                'node_available': node_available,
-                'voltages': summary.get('voltages', {}),
-                'temp_humidity': summary.get('temp_humidity', {}),
-                'thruster_status': summary.get('thruster_status', {}),
-                'flow_data': summary.get('flow_data', {}),
-                'data_updated_at': summary.get('data_updated_at'),
-                'connection_info': summary.get('connection_info', {}),
-            }
-
-            # Pi5-specific fields (MQTT water quality / UPS)
-            if name == 'pi5_sensors':
-                _attach_pi5_fields(sensor_result, metrics, summary)
-
-            sensors[name] = sensor_result
-        except Exception as e:
-            logger.debug(f"Error collecting {name}: {e}")
-            sensors[name] = {
-                'status': 'unknown',
-                'color': '#6b7280',
-                'value': 'N/A',
-                'message': str(e),
-                'connected': '--',
-                'topic_available': None,
-                'node_available': None,
-            }
-
-    # Calculate overall status
-    statuses = [s['status'] for s in sensors.values()]
-    if 'critical' in statuses:
-        overall = 'critical'
-    elif 'warning' in statuses:
-        overall = 'warning'
-    elif 'unknown' in statuses:
-        overall = 'unknown'
-    else:
-        overall = 'ok'
-
-    ok_count = sum(1 for s in sensors.values() if s['status'] == 'ok')
-
-    return {
-        'sensors': sensors,
-        'overall': overall,
-        'summary': f"{ok_count}/{len(sensors)} OK",
-    }
+    sensors = {name: _check_single_sensor(name) for name in SENSOR_NAMES}
+    return _summarize_sensor_results(sensors)
 
 
 def collect_ros2_status() -> Dict[str, Any]:
@@ -2096,6 +1948,7 @@ app = FastAPI(
 # Mount static files and templates
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+templates.env.globals["frontend_sensor_defs_json"] = json.dumps(_build_frontend_sensor_catalog())
 
 
 # =============================================================================

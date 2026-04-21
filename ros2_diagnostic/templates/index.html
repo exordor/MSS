@@ -767,6 +767,7 @@ const TIME_REFRESH_INTERVAL = {{ time_refresh_interval or 1000 }};
 {% block extra_scripts %}
 <!-- Chart.js (only loaded on dashboard page) -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js" defer></script>
+<script src="/static/js/sensor-config.js?v=2"></script>
 <script src="/static/js/alerts.js?v=2"></script>
-<script src="/static/js/dashboard.js?v=3"></script>
+<script src="/static/js/dashboard.js?v=4"></script>
 {% endblock %}

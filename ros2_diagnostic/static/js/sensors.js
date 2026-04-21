@@ -47,7 +47,6 @@ function switchSensorTab(sensor) {
 }
 
 function activateRequestedSensorTab() {
-    const validSensors = new Set(['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery', 'pi5_sensors']);
     const params = new URLSearchParams(window.location.search);
     let requested = params.get('sensor');
 
@@ -55,7 +54,7 @@ function activateRequestedSensorTab() {
         requested = window.location.hash.replace('#', '').replace('Panel', '');
     }
 
-    if (requested && validSensors.has(requested)) {
+    if (requested && SensorCatalog.has(requested)) {
         switchSensorTab(requested);
     }
 }

@@ -3,17 +3,6 @@
  * WebSocket-based real-time updates
  */
 
-// Sensor info configuration
-const SENSOR_INFO = {
-    navi_lidar: { name: 'Navi LiDAR', icon: 'fa-radar', nodePatterns: ['hesai', 'navi', 'lidar'] },
-    uli_lidar: { name: 'U-LiDAR', icon: 'fa-satellite-dish', nodePatterns: [] },
-    camera: { name: 'Camera', icon: 'fa-camera', nodePatterns: ['camera', 'galaxy', 'gmsl'] },
-    imu: { name: 'IMU', icon: 'fa-compass', nodePatterns: ['sbg', 'imu', 'ekf'] },
-    thruster: { name: 'Arduino', icon: 'fa-microchip', nodePatterns: ['thruster', 'pwm', 'motor'] },
-    battery: { name: 'Battery', icon: 'fa-battery-half', nodePatterns: ['battery', 'ads1115'] },
-    pi5_sensors: { name: 'Pi5 Sensors', icon: 'fa-water', nodePatterns: ['thruster_wifi_node', 'thruster'] },
-};
-
 // Sensor update tracking
 let sensorsLastUpdate = 0;
 let sensorsUpdateInterval = 1000; // 1 second (matching backend)
@@ -39,10 +28,10 @@ function initSensorsTable() {
     const tableBody = document.getElementById('sensorsTableBody');
     if (!tableBody) return;
 
-    const sensors = ['navi_lidar', 'uli_lidar', 'camera', 'imu', 'thruster', 'battery', 'pi5_sensors'];
+    const sensors = SensorCatalog.getNames();
     let html = '';
     for (const sensor of sensors) {
-        const info = SENSOR_INFO[sensor];
+        const info = SensorCatalog.get(sensor);
         html += `
             <tr id="row-${sensor}" data-sensor="${sensor}">
                 <td>
@@ -230,67 +219,29 @@ function updateSensorsDisplay(sensorsData) {
         else if (status === 'disconnected') counts.disconnected++;
         else if (status === 'critical') counts.critical++;
 
-        // Check node availability from cached ROS2 nodes
-        // Node patterns for each sensor
-        const nodePatterns = {
-            navi_lidar: ['navi_lidar_driver', 'hesai', 'lidar'],
-            uli_lidar: ['uli_lidar', 'lidar'],
-            camera: ['galaxy_camera', 'camera'],
-            imu: ['sbg_device', 'imu', 'ekf'],
-            thruster: ['thruster_wifi_node', 'thruster'],
-            battery: ['battery_monitor', 'battery'],
-            pi5_sensors: ['thruster_wifi_node', 'thruster'],
-        };
-
-        // Topic patterns for each sensor
-        const topicPatterns = {
-            navi_lidar: ['points', 'hesai'],
-            uli_lidar: ['points', 'uli'],
-            camera: ['image_raw', 'camera'],
-            imu: ['imu/data', 'sbg'],
-            thruster: ['thruster_status', 'thruster'],
-            battery: ['battery_voltage', 'battery'],
-            pi5_sensors: ['water_quality'],
-        };
-
-        // Use cached ROS2 data for node/topic detection
-        // Skip node/topic check for uli_lidar (no ROS driver)
-        let nodeAvailable = false;
-        let topicAvailable = false;
-        let showNodeTopic = sensorName !== 'uli_lidar';
-
-        if (showNodeTopic) {
-            if (ros2NodesCache && ros2NodesCache.length > 0) {
-                const patterns = nodePatterns[sensorName] || [];
-                nodeAvailable = ros2NodesCache.some(node =>
-                    patterns.some(pattern => node.toLowerCase().includes(pattern.toLowerCase()))
-                );
-            } else {
-                // Fallback to backend value
-                nodeAvailable = sensorData.node_available === true;
-            }
-
-            if (ros2TopicsCache && ros2TopicsCache.length > 0) {
-                const patterns = topicPatterns[sensorName] || [];
-                topicAvailable = ros2TopicsCache.some(topic =>
-                    patterns.some(pattern => topic.toLowerCase().includes(pattern.toLowerCase()))
-                );
-            } else {
-                // Fallback to backend value
-                topicAvailable = sensorData.topic_available === true;
-            }
-        }
+        const showNodeTopic = SensorCatalog.shouldShowNodeTopic(sensorName);
+        const nodeAvailable = SensorCatalog.resolveNodeAvailable(
+            sensorName,
+            ros2NodesCache,
+            sensorData.node_available
+        );
+        const topicAvailable = SensorCatalog.resolveTopicAvailable(
+            sensorName,
+            ros2TopicsCache,
+            sensorData.topic_available
+        );
 
         const row = document.getElementById(`row-${sensorName}`);
         if (row) {
             const nodeCell = showNodeTopic ? getStatusIcon(nodeAvailable) : '<span class="text-muted">N/A</span>';
             const topicCell = showNodeTopic ? getStatusIcon(topicAvailable) : '<span class="text-muted">N/A</span>';
+            const info = SensorCatalog.get(sensorName) || { icon: 'fa-microchip', name: sensorName };
 
             row.innerHTML = `
                 <td>
                     <div class="sensor-name">
-                        <i class="fa-solid ${SENSOR_INFO[sensorName].icon}"></i>
-                        <span>${SENSOR_INFO[sensorName].name}</span>
+                        <i class="fa-solid ${info.icon}"></i>
+                        <span>${info.name}</span>
                     </div>
                 </td>
                 <td>${getStatusIcon(connected)}</td>
