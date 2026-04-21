@@ -51,11 +51,20 @@ def _resolve(path: str) -> str:
 
 logs_cfg = cfg.get("logs", {})
 LOG_ROOT = _resolve(logs_cfg.get("base_dir", "logs"))
+rotation_cfg = logs_cfg.get("rotation", {})
 
 LOG_FILES = {
     "diagnostic": _resolve(logs_cfg.get("diagnostic_log", "ros2_diagnostic/logs/diagnostic.log")),
     "ros2_control": _resolve(logs_cfg.get("ros2_control_log", "ros2_diagnostic/logs/ros2.log")),
     "ros": _resolve(logs_cfg.get("ros_log_hint", "scripts/ros2/web_controller/test.log")),
+}
+
+LOG_ROTATION = {
+    "enabled": bool(rotation_cfg.get("enabled", True)),
+    "max_mb": float(rotation_cfg.get("max_mb", 20)),
+    "backup_count": int(rotation_cfg.get("backup_count", 10)),
+    "compress": bool(rotation_cfg.get("compress", True)),
+    "encoding": rotation_cfg.get("encoding", "utf-8"),
 }
 
 

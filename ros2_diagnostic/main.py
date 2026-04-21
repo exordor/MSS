@@ -8,12 +8,14 @@ import os
 import sys
 import json
 import logging
+import gzip
 import time
 import asyncio
 import io
 import re
 import shutil
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from threading import Thread, Lock
 from typing import List, Dict, Any, Optional, Set
 from enum import Enum
@@ -34,6 +36,7 @@ from config import (
     ROS2_CONFIG, ROS2_CONTROL, ROSBAG_CONFIG, SENSOR_IPS, SENSOR_THRESHOLDS,
     EXPECTED_NODES, IGNORED_NODES, SENSOR_NODES, ROS2_TOPICS,
     ENABLE_TOPIC_DETAILS, CACHE_TTL, LOG_FILES, LOG_ROOT, UI_CONFIG, PROJECT_ROOT,
+    LOG_ROTATION,
     TOOLS_CONFIG_FILES, TOOLS_SCRIPTS, EVENT_LOG_CONFIG, SENSOR_I2C, TIME_CONFIG,
     MQTT_CONFIG
 )
@@ -51,11 +54,63 @@ from event_log import get_event_store, EventLog
 # Configure logging
 # =============================================================================
 
+
+def _gzip_rotated_log(source: str, dest: str) -> None:
+    """Compress a rotated log file and remove the uncompressed source."""
+    with open(source, "rb") as src, gzip.open(dest, "wb") as dst:
+        shutil.copyfileobj(src, dst)
+    os.remove(source)
+
+
+def _build_diagnostic_log_handler(
+    log_path: Optional[str] = None,
+    rotation_config: Optional[Dict[str, Any]] = None
+) -> logging.Handler:
+    """Create the diagnostic file handler with size-based rotation."""
+    target_path = log_path or LOG_FILES.get('diagnostic', 'diagnostic.log')
+    config = rotation_config or LOG_ROTATION
+    encoding = config.get("encoding", "utf-8")
+
+    log_dir = os.path.dirname(target_path)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+
+    enabled = bool(config.get("enabled", True))
+    max_mb = max(float(config.get("max_mb", 20)), 0.0)
+    backup_count = max(int(config.get("backup_count", 10)), 0)
+    compress = bool(config.get("compress", True))
+
+    if not enabled or max_mb <= 0 or backup_count <= 0:
+        return logging.FileHandler(target_path, encoding=encoding)
+
+    handler = RotatingFileHandler(
+        target_path,
+        maxBytes=max(1, int(max_mb * 1024 * 1024)),
+        backupCount=backup_count,
+        encoding=encoding,
+    )
+
+    if compress:
+        handler.namer = lambda name: f"{name}.gz"
+        handler.rotator = _gzip_rotated_log
+
+    try:
+        if os.path.exists(target_path) and os.path.getsize(target_path) >= handler.maxBytes:
+            handler.doRollover()
+    except OSError as e:
+        logging.getLogger("logging_setup").warning(
+            "Failed to rotate oversized diagnostic log %s: %s",
+            target_path,
+            e,
+        )
+
+    return handler
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(LOG_FILES.get('diagnostic', 'diagnostic.log')),
+        _build_diagnostic_log_handler(),
         logging.StreamHandler()
     ]
 )

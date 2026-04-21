@@ -54,6 +54,13 @@ logs:
   diagnostic_log: "ros2_diagnostic/logs/diagnostic.log"
   # Path to ROS2 control log file
   ros2_control_log: "ros2_diagnostic/logs/ros2.log"
+  # Diagnostic log rotation to avoid a single ever-growing file
+  rotation:
+    enabled: true
+    max_mb: 20
+    backup_count: 10
+    compress: true
+    encoding: "utf-8"
 
 # ------------------------------------------------------------------------------
 # MQTT Configuration
