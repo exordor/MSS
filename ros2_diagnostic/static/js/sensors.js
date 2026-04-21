@@ -416,12 +416,30 @@ function updatePi5SensorsPanel(data) {
         netEl.className = 'info-value ' + (connected === 'Connected' ? 'text-success' : 'text-danger');
     }
 
+    const wq = data.water_quality || {};
+    const hasData = wq && Object.keys(wq).length > 0;
+    const mqttEl = document.getElementById('pi5MqttStatus');
+    if (mqttEl) {
+        if (hasData && data.water_quality_fresh !== false) {
+            mqttEl.textContent = 'Streaming';
+            mqttEl.className = 'info-value text-success';
+        } else if (hasData) {
+            mqttEl.textContent = 'Stale';
+            mqttEl.className = 'info-value text-warning';
+        } else {
+            mqttEl.textContent = 'No data';
+            mqttEl.className = 'info-value';
+        }
+    }
+
     const ageEl = document.getElementById('pi5DataAge');
     if (ageEl) {
-        const wq = data.water_quality || {};
-        const hasData = wq && Object.keys(wq).length > 0;
-        if (hasData) {
-            ageEl.textContent = 'Active';
+        if (data.water_quality_age_s !== undefined && data.water_quality_age_s !== null) {
+            const ageSeconds = Math.max(0, Number(data.water_quality_age_s));
+            ageEl.textContent = `${ageSeconds.toFixed(1)} s`;
+            ageEl.className = 'info-value ' + (data.water_quality_fresh === false ? 'text-warning' : 'text-success');
+        } else if (hasData) {
+            ageEl.textContent = '0.0 s';
             ageEl.className = 'info-value text-success';
         } else {
             ageEl.textContent = 'No data';
@@ -430,7 +448,6 @@ function updatePi5SensorsPanel(data) {
     }
 
     // Water quality
-    const wq = data.water_quality || {};
     setInfoValue('pi5C4eTemp', wq.c4e_temp_c, ' °C');
     setInfoValue('pi5Conductivity', wq.c4e_conductivity_uscm, ' µS/cm');
     setInfoValue('pi5Salinity', wq.c4e_salinity_ppt, ' ppt');
@@ -438,9 +455,11 @@ function updatePi5SensorsPanel(data) {
     setInfoValue('pi5OptodTemp', wq.optod_temp_c, ' °C');
     setInfoValue('pi5O2Sat', wq.optod_o2_saturation_pct, ' %');
     setInfoValue('pi5O2Mgl', wq.optod_o2_mgl, ' mg/L');
+    setInfoValue('pi5O2Ppm', wq.optod_o2_ppm, ' ppm');
     setInfoValue('pi5PhTemp', wq.ph_temp_c, ' °C');
     setInfoValue('pi5Ph', wq.ph_ph, '');
     setInfoValue('pi5Redox', wq.ph_redox_mv, ' mV');
+    setInfoValue('pi5PhMv', wq.ph_mv, ' mV');
 
     // UPS status
     const ups = data.ups || {};
@@ -457,11 +476,14 @@ function updatePi5SensorsPanel(data) {
         dom: {
             status: document.getElementById('pi5SensorsStatusBadge')?.textContent || null,
             network: document.getElementById('pi5NetworkStatus')?.textContent || null,
+            mqtt: document.getElementById('pi5MqttStatus')?.textContent || null,
             dataAge: document.getElementById('pi5DataAge')?.textContent || null,
             c4eTemp: document.getElementById('pi5C4eTemp')?.textContent || null,
             conductivity: document.getElementById('pi5Conductivity')?.textContent || null,
+            o2Ppm: document.getElementById('pi5O2Ppm')?.textContent || null,
             ph: document.getElementById('pi5Ph')?.textContent || null,
             redox: document.getElementById('pi5Redox')?.textContent || null,
+            phMv: document.getElementById('pi5PhMv')?.textContent || null,
             upsState: document.getElementById('pi5UpsState')?.textContent || null,
         }
     };

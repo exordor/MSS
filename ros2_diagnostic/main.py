@@ -946,7 +946,8 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
             final_color = 'red'
             final_message = summary.get('message', '') or 'Sensor disconnected'
 
-        # Only upgrade status when physical connectivity is confirmed
+        # Only promote status when physical connectivity is confirmed.
+        # battery and pi5_sensors still report node/topic availability separately.
         if sensor_name not in ['uli_lidar', 'battery', 'pi5_sensors'] and node_available is not None:
             if physical_connected and node_available and topic_available:
                 # Both node and topic available - status is OK
@@ -1001,10 +1002,7 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
             if 'voltages' in summary:
                 result['voltages'] = summary['voltages']
         elif sensor_name == 'pi5_sensors':
-            if 'water_quality' in summary:
-                result['water_quality'] = summary['water_quality']
-            if 'ups' in summary:
-                result['ups'] = summary['ups']
+            _attach_pi5_fields(result, metrics, summary)
 
             logger.info(
                 "[PI5_DEBUG] _check_single_sensor summary_keys=%s result_status=%s has_wq=%s has_ups=%s",
@@ -1254,6 +1252,17 @@ def collect_ros2_status_cached() -> Dict[str, Any]:
     return result
 
 
+def _attach_pi5_fields(result: dict, metrics: dict, summary: dict):
+    if 'water_quality' in summary:
+        result['water_quality'] = summary['water_quality']
+    if 'ups' in summary:
+        result['ups'] = summary['ups']
+    result['water_quality_age_s'] = metrics.get('water_quality_age_s')
+    result['water_quality_fresh'] = metrics.get('water_quality_fresh')
+    result['ups_age_s'] = metrics.get('ups_age_s')
+    result['ups_fresh'] = metrics.get('ups_fresh')
+
+
 def _get_topic_available(metrics: dict, sensor_name: str) -> Optional[bool]:
     """Extract topic availability from sensor metrics.
 
@@ -1280,6 +1289,7 @@ def _get_topic_available(metrics: dict, sensor_name: str) -> Optional[bool]:
         'camera': ['image_raw', 'camera'],
         'imu': ['imu/data', 'sbg'],
         'thruster': ['thruster_status', 'thruster'],
+        'pi5_sensors': ['water_quality'],
     }
 
     # Method 1: Check from sensor metrics (most reliable if available)
@@ -1405,7 +1415,7 @@ def _get_node_available(sensor_name: str) -> Optional[bool]:
         'camera': ['galaxy_camera', 'camera'],
         'imu': ['sbg_device', 'imu'],
         'thruster': ['thruster_wifi_node', 'thruster'],
-        'pi5_sensors': ['thruster_wifi_node'],
+        'pi5_sensors': ['thruster_wifi_node', 'thruster'],
     }
 
     if sensor_name not in node_patterns:
@@ -1571,8 +1581,8 @@ def collect_sensor_status() -> Dict[str, Any]:
             topic_available = _get_topic_available(metrics, name)
             node_available = _get_node_available(name)
 
-            # Calculate final status based on node/topic availability
-            # Skip uli_lidar (no ROS driver) and pi5_sensors (MQTT-only)
+            # Calculate final status based on node/topic availability.
+            # pi5_sensors still checks node/topic, but does not promote status here.
             final_status = summary['status']
             final_color = summary['color']
             final_message = summary.get('message', '')
@@ -1627,10 +1637,7 @@ def collect_sensor_status() -> Dict[str, Any]:
 
             # Pi5-specific fields (MQTT water quality / UPS)
             if name == 'pi5_sensors':
-                if 'water_quality' in summary:
-                    sensor_result['water_quality'] = summary['water_quality']
-                if 'ups' in summary:
-                    sensor_result['ups'] = summary['ups']
+                _attach_pi5_fields(sensor_result, metrics, summary)
 
             sensors[name] = sensor_result
         except Exception as e:

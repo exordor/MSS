@@ -11,7 +11,7 @@ const SENSOR_INFO = {
     imu: { name: 'IMU', icon: 'fa-compass', nodePatterns: ['sbg', 'imu', 'ekf'] },
     thruster: { name: 'Arduino', icon: 'fa-microchip', nodePatterns: ['thruster', 'pwm', 'motor'] },
     battery: { name: 'Battery', icon: 'fa-battery-half', nodePatterns: ['battery', 'ads1115'] },
-    pi5_sensors: { name: 'Pi5 Sensors', icon: 'fa-water', nodePatterns: [] },
+    pi5_sensors: { name: 'Pi5 Sensors', icon: 'fa-water', nodePatterns: ['thruster_wifi_node', 'thruster'] },
 };
 
 // Sensor update tracking
@@ -239,6 +239,7 @@ function updateSensorsDisplay(sensorsData) {
             imu: ['sbg_device', 'imu', 'ekf'],
             thruster: ['thruster_wifi_node', 'thruster'],
             battery: ['battery_monitor', 'battery'],
+            pi5_sensors: ['thruster_wifi_node', 'thruster'],
         };
 
         // Topic patterns for each sensor
@@ -249,13 +250,14 @@ function updateSensorsDisplay(sensorsData) {
             imu: ['imu/data', 'sbg'],
             thruster: ['thruster_status', 'thruster'],
             battery: ['battery_voltage', 'battery'],
+            pi5_sensors: ['water_quality'],
         };
 
         // Use cached ROS2 data for node/topic detection
-        // Skip node/topic check for uli_lidar (no ROS driver) and pi5_sensors (MQTT-only)
+        // Skip node/topic check for uli_lidar (no ROS driver)
         let nodeAvailable = false;
         let topicAvailable = false;
-        let showNodeTopic = sensorName !== 'uli_lidar' && sensorName !== 'pi5_sensors';
+        let showNodeTopic = sensorName !== 'uli_lidar';
 
         if (showNodeTopic) {
             if (ros2NodesCache && ros2NodesCache.length > 0) {
@@ -356,6 +358,8 @@ function updateArduinoSummaryCard(sensors) {
     const secondaryEl = document.getElementById('arduinoSummarySecondary');
     const batteryEl = document.getElementById('arduinoSummaryBattery');
     const pi5El = document.getElementById('arduinoSummaryPi5');
+    const pi5AuxEl = document.getElementById('arduinoSummaryPi5Aux');
+    const pi5LinkEl = document.getElementById('arduinoSummaryPi5Link');
     const updatedEl = document.getElementById('arduinoSummaryUpdated');
     if (!primaryEl || !secondaryEl || !batteryEl || !updatedEl) return;
 
@@ -399,17 +403,83 @@ function updateArduinoSummaryCard(sensors) {
     });
     batteryEl.textContent = batteryParts.length > 0 ? `Battery: ${batteryParts.join(' | ')}` : 'Battery: --';
 
-    const pi5Parts = [];
-    if (wq.ph_ph !== undefined && wq.ph_ph !== null) pi5Parts.push(`pH: ${wq.ph_ph.toFixed(2)}`);
-    if (wq.ph_redox_mv !== undefined && wq.ph_redox_mv !== null) pi5Parts.push(`Redox: ${wq.ph_redox_mv.toFixed(1)} mV`);
-    if (wq.optod_o2_mgl !== undefined && wq.optod_o2_mgl !== null) pi5Parts.push(`O2: ${wq.optod_o2_mgl.toFixed(2)} mg/L`);
-    if (wq.c4e_conductivity_uscm !== undefined && wq.c4e_conductivity_uscm !== null) pi5Parts.push(`Cond: ${wq.c4e_conductivity_uscm.toFixed(1)} µS/cm`);
-    if (wq.c4e_temp_c !== undefined && wq.c4e_temp_c !== null) pi5Parts.push(`Temp: ${wq.c4e_temp_c.toFixed(1)}°C`);
-    if (pi5El) pi5El.textContent = pi5Parts.length > 0 ? `Pi5: ${pi5Parts.join(' | ')}` : 'Pi5: --';
+    const pi5PrimaryParts = [
+        formatPi5Metric('pH', wq.ph_ph, '', 2),
+        formatPi5Metric('Redox', wq.ph_redox_mv, ' mV', 1),
+        formatPi5Metric('O2', wq.optod_o2_mgl, ' mg/L', 2),
+        formatPi5Metric('Sat', wq.optod_o2_saturation_pct, ' %', 1),
+        formatPi5Metric('Cond', wq.c4e_conductivity_uscm, ' µS/cm', 2),
+    ].filter(Boolean);
+    if (pi5El) {
+        pi5El.textContent = pi5PrimaryParts.length > 0
+            ? `Pi5 Water: ${pi5PrimaryParts.join(' | ')}`
+            : 'Pi5 Water: --';
+    }
+
+    const pi5AuxParts = [
+        formatPi5Metric('C4E T', wq.c4e_temp_c, '°C', 1),
+        formatPi5Metric('OPTOD T', wq.optod_temp_c, '°C', 1),
+        formatPi5Metric('pH T', wq.ph_temp_c, '°C', 1),
+        formatPi5Metric('O2 ppm', wq.optod_o2_ppm, '', 2),
+        formatPi5Metric('Sal', wq.c4e_salinity_ppt, ' ppt', 4),
+        formatPi5Metric('TDS', wq.c4e_tds_ppm, ' ppm', 2),
+        formatPi5Metric('pH mV', wq.ph_mv, ' mV', 1),
+    ].filter(Boolean);
+    if (pi5AuxEl) {
+        pi5AuxEl.textContent = pi5AuxParts.length > 0
+            ? `Pi5 Detail: ${pi5AuxParts.join(' | ')}`
+            : 'Pi5 Detail: --';
+    }
+
+    const pi5LinkParts = [];
+    if (pi5 && pi5.water_quality_age_s !== undefined && pi5.water_quality_age_s !== null) {
+        pi5LinkParts.push(`Age: ${Number(pi5.water_quality_age_s).toFixed(1)}s`);
+    }
+    const upsSummary = formatPi5UpsSummary(pi5 && pi5.ups ? pi5.ups : {});
+    if (upsSummary) {
+        pi5LinkParts.push(`UPS: ${upsSummary}`);
+    }
+    if (pi5LinkEl) {
+        pi5LinkEl.textContent = pi5LinkParts.length > 0
+            ? `Pi5 Status: ${pi5LinkParts.join(' | ')}`
+            : 'Pi5 Status: --';
+    }
 
     updatedEl.textContent = arduino && arduino.data_updated_at
         ? `Updated: ${formatArduinoTimestamp(arduino.data_updated_at)}`
         : 'Updated: --';
+}
+
+function formatPi5Metric(label, value, suffix = '', digits = 2) {
+    if (value === undefined || value === null) return null;
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return `${label}: ${value.toFixed(digits)}${suffix}`;
+    }
+    return `${label}: ${value}${suffix}`;
+}
+
+function formatPi5UpsSummary(ups) {
+    if (!ups || typeof ups !== 'object' || Object.keys(ups).length === 0) return null;
+
+    const parts = [];
+    if (ups.parameter) {
+        parts.push(String(ups.parameter));
+    } else if (ups.component) {
+        parts.push(String(ups.component));
+    }
+
+    if (ups.value !== undefined && ups.value !== null) {
+        const valueText = typeof ups.value === 'number' && Number.isFinite(ups.value)
+            ? ups.value.toFixed(2)
+            : String(ups.value);
+        parts.push(valueText);
+    }
+
+    if (ups.state) {
+        parts.push(`(${ups.state})`);
+    }
+
+    return parts.length > 0 ? parts.join(' ') : null;
 }
 
 function formatArduinoTimestamp(timestamp) {
