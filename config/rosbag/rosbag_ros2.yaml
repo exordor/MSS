@@ -23,4 +23,6 @@ topics:
   - /speed_data
   - /battery_voltage
   - /temp_humidity
+  - /ups_status
+  - /water_quality
 output: ros2_bringup_all_
