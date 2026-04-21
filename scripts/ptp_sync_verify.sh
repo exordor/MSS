@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # PTP System Clock Sync Verification Script
-# 验证 phc2sys 是否正确将 PTP 时间同步到系统时钟
+# Verify if phc2sys correctly synchronizes PTP time to system clock
 # Usage: sudo ./ptp_sync_verify.sh
 
 echo "========================================"
@@ -188,8 +188,8 @@ echo "🖥️  6. Hardware Timestamping Support"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# ethtool -T 输出格式: capabilities 下列出支持的特性
-# 检查 grep 是否找到对应行
+# ethtool -T output format: supported features listed under capabilities
+# Check if grep finds the matching line
 HW_RX_CHECK=$(ethtool -T $INTERFACE 2>/dev/null | grep "hardware-receive")
 HW_TX_CHECK=$(ethtool -T $INTERFACE 2>/dev/null | grep "hardware-transmit")
 

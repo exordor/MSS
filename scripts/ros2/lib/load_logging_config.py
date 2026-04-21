@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-ROS2 日志配置加载器
-从 YAML 文件加载日志配置并导出为环境变量
+ROS2 Logging Configuration Loader
+Load logging configuration from YAML file and export as environment variables
 """
 import sys
 import os
@@ -9,12 +9,12 @@ import os
 
 def load_logging_config(config_file, profile=None, export_format=True):
     """
-    从 YAML 文件加载日志配置
+    Load logging configuration from YAML file
 
     Args:
-        config_file: YAML 配置文件路径
-        profile: 要使用的 profile 名称
-        export_format: 是否输出 bash export 格式
+        config_file: Path to YAML configuration file
+        profile: Profile name to use
+        export_format: Whether to output in bash export format
     """
     try:
         import yaml
@@ -35,13 +35,13 @@ def load_logging_config(config_file, profile=None, export_format=True):
         print(f"# Error loading config: {e}", file=sys.stderr)
         return get_default_exports() if export_format else get_default_config()
 
-    # 获取默认 profile
+    # Get default profile
     if not profile:
         profile = data.get('default_profile', 'dev')
 
     profiles = data.get('profiles', {})
 
-    # 如果指定的 profile 不存在，使用 dev 或第一个可用的
+    # If specified profile not found, fall back to dev or first available
     if profile not in profiles:
         print(f"# Warning: Profile '{profile}' not found, using 'dev'", file=sys.stderr)
         profile = 'dev' if 'dev' in profiles else next(iter(profiles.keys()), 'dev')
@@ -55,7 +55,7 @@ def load_logging_config(config_file, profile=None, export_format=True):
 
 
 def get_default_exports():
-    """返回默认配置的 export 格式"""
+    """Return default configuration in export format"""
     return [
         "export LOGGING_ACTIVE_PROFILE='default'",
         "export RCUTILS_LOGGING_USE_STDOUT='1'",
@@ -68,7 +68,7 @@ def get_default_exports():
 
 
 def get_default_config():
-    """返回默认配置的字典格式"""
+    """Return default configuration in dictionary format"""
     return {
         'profile': 'default',
         'rcutils': {
@@ -86,7 +86,7 @@ def get_default_config():
 
 
 def format_exports(profile, config):
-    """格式化为 bash export 语句"""
+    """Format as bash export statements"""
     rcutils = config.get('rcutils', {})
     python = config.get('python', {})
 
@@ -103,7 +103,7 @@ def format_exports(profile, config):
 
 
 def format_config_dict(profile, config, config_file):
-    """格式化为配置字典"""
+    """Format as configuration dictionary"""
     rcutils = config.get('rcutils', {})
     python = config.get('python', {})
 
@@ -125,7 +125,7 @@ def format_config_dict(profile, config, config_file):
 
 
 def main():
-    """命令行入口"""
+    """CLI entry point"""
     if len(sys.argv) < 2:
         print("Usage: load_logging_config.py <config_file> [profile]", file=sys.stderr)
         print("Environment variables:", file=sys.stderr)
@@ -133,17 +133,17 @@ def main():
         print("  LOGGING_CONFIG - override config file", file=sys.stderr)
         sys.exit(1)
 
-    # 获取配置文件路径（支持环境变量覆盖）
+    # Get config file path (supports environment variable override)
     config_file = os.getenv('LOGGING_CONFIG', sys.argv[1])
 
-    # 获取 profile（优先级：命令行参数 > 环境变量 > YAML 中默认值）
+    # Get profile (priority: CLI argument > environment variable > YAML default)
     profile = None
     if len(sys.argv) > 2:
         profile = sys.argv[2]
     elif 'LOG_PROFILE' in os.environ:
         profile = os.environ['LOG_PROFILE']
 
-    # 加载并输出配置
+    # Load and output configuration
     exports = load_logging_config(config_file, profile, export_format=True)
     for line in exports:
         print(line)
