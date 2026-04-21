@@ -252,10 +252,10 @@ function updateSensorsDisplay(sensorsData) {
         };
 
         // Use cached ROS2 data for node/topic detection
-        // Skip node/topic check for uli_lidar (no ROS driver)
+        // Skip node/topic check for uli_lidar (no ROS driver) and pi5_sensors (MQTT-only)
         let nodeAvailable = false;
         let topicAvailable = false;
-        let showNodeTopic = sensorName !== 'uli_lidar';
+        let showNodeTopic = sensorName !== 'uli_lidar' && sensorName !== 'pi5_sensors';
 
         if (showNodeTopic) {
             if (ros2NodesCache && ros2NodesCache.length > 0) {
@@ -401,8 +401,10 @@ function updateArduinoSummaryCard(sensors) {
 
     const pi5Parts = [];
     if (wq.ph_ph !== undefined && wq.ph_ph !== null) pi5Parts.push(`pH: ${wq.ph_ph.toFixed(2)}`);
+    if (wq.ph_redox_mv !== undefined && wq.ph_redox_mv !== null) pi5Parts.push(`Redox: ${wq.ph_redox_mv.toFixed(1)} mV`);
     if (wq.optod_o2_mgl !== undefined && wq.optod_o2_mgl !== null) pi5Parts.push(`O2: ${wq.optod_o2_mgl.toFixed(2)} mg/L`);
     if (wq.c4e_conductivity_uscm !== undefined && wq.c4e_conductivity_uscm !== null) pi5Parts.push(`Cond: ${wq.c4e_conductivity_uscm.toFixed(1)} µS/cm`);
+    if (wq.c4e_temp_c !== undefined && wq.c4e_temp_c !== null) pi5Parts.push(`Temp: ${wq.c4e_temp_c.toFixed(1)}°C`);
     if (pi5El) pi5El.textContent = pi5Parts.length > 0 ? `Pi5: ${pi5Parts.join(' | ')}` : 'Pi5: --';
 
     updatedEl.textContent = arduino && arduino.data_updated_at

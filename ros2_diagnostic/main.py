@@ -138,32 +138,32 @@ def calculate_state_diff(prev: dict, curr: dict) -> dict:
 # =============================================================================
 
 class Channel(Enum):
-    """WebSocket 数据频道"""
-    SENSORS = "sensors"       # 传感器状态 (1秒)
-    CONNECTIVITY = "connectivity"  # 连接性快速更新
-    ALERTS = "alerts"         # 告警 (实时)
-    ROS2 = "ros2"            # ROS2 系统 (10秒)
-    ROS2_CONTROL = "ros2_control"  # ROS2 控制 (5秒)
-    ROSBAG = "rosbag"        # Rosbag (5秒)
+    """WebSocket data channels"""
+    SENSORS = "sensors"       # Sensor status (1s)
+    CONNECTIVITY = "connectivity"  # Connectivity fast update
+    ALERTS = "alerts"         # Alerts (real-time)
+    ROS2 = "ros2"            # ROS2 system (10s)
+    ROS2_CONTROL = "ros2_control"  # ROS2 control (5s)
+    ROSBAG = "rosbag"        # Rosbag (5s)
 
 
 @dataclass
 class ConnectionInfo:
-    """WebSocket 连接信息"""
+    """WebSocket connection info"""
     websocket: Any  # WebSocket object
-    channels: Set[Channel]  # 订阅的频道
-    connected_at: float  # 连接时间
+    channels: Set[Channel]  # Subscribed channels
+    connected_at: float  # Connection time
 
 
 # =============================================================================
-# WebSocket Connection Manager (支持订阅模式)
+# WebSocket Connection Manager (subscription-based)
 # =============================================================================
 
 class ConnectionManager:
-    """支持订阅的连接管理器"""
+    """Subscription-based connection manager"""
 
     def __init__(self):
-        # 新格式：connections[websocket] = ConnectionInfo
+        # New format: connections[websocket] = ConnectionInfo
         self.connections: Dict[Any, ConnectionInfo] = {}
         self._lock = Lock()
 
@@ -172,7 +172,7 @@ class ConnectionManager:
         websocket: WebSocket,
         channels: List[Channel] = None
     ):
-        """接受新连接并设置默认订阅"""
+        """Accept new connection with default subscriptions"""
         await websocket.accept()
 
         with self._lock:
@@ -189,14 +189,14 @@ class ConnectionManager:
         )
 
     async def subscribe(self, websocket: WebSocket, channel: Channel):
-        """订阅频道"""
+        """Subscribe to a channel"""
         with self._lock:
             if websocket in self.connections:
                 self.connections[websocket].channels.add(channel)
                 logger.debug(f"[WS] Subscribed to {channel.value}")
 
     async def unsubscribe(self, websocket: WebSocket, channel: Channel):
-        """取消订阅"""
+        """Unsubscribe from a channel"""
         with self._lock:
             if websocket in self.connections:
                 self.connections[websocket].channels.discard(channel)
@@ -207,7 +207,7 @@ class ConnectionManager:
         channel: Channel,
         message: dict
     ):
-        """向订阅了特定频道的客户端广播"""
+        """Broadcast to clients subscribed to a specific channel"""
         disconnected = []
 
         # Get connections that are subscribed to this channel
@@ -223,7 +223,7 @@ class ConnectionManager:
                 logger.debug(f"[WS] Send failed: {e}")
                 disconnected.append(ws)
 
-        # 清理断开的连接
+        # Clean up disconnected clients
         for ws in disconnected:
             await self._async_disconnect(ws)
 
@@ -276,10 +276,10 @@ class ConnectionManager:
         The cache is warmed by the background broadcaster and startup warm-up.
 
         Args:
-            websocket: WebSocket 连接
-            channels: 订阅的频道（可选，从 ConnectionInfo 获取）
+            websocket: WebSocket connection
+            channels: Subscribed channels (optional, from ConnectionInfo)
         """
-        # 如果没有指定频道，从连接信息获取
+        # If no channels specified, get from connection info
         if channels is None:
             with self._lock:
                 info = self.connections.get(websocket)
@@ -371,7 +371,18 @@ class ConnectionManager:
             "timestamp": time.time()
         })
 
-        # 发送订阅确认
+        if "sensors" in state:
+            pi5_data = state.get("sensors", {}).get("sensors", {}).get("pi5_sensors")
+            if pi5_data is not None:
+                logger.info(
+                    "[PI5_DEBUG] full_state pi5 status=%s has_wq=%s has_ups=%s keys=%s",
+                    pi5_data.get("status"),
+                    bool(pi5_data.get("water_quality")),
+                    bool(pi5_data.get("ups")),
+                    sorted(pi5_data.keys()),
+                )
+
+        # Send subscription confirmation
         await websocket.send_json({
             "type": "subscribed",
             "channels": [c.value for c in channels],
@@ -392,9 +403,9 @@ manager = ConnectionManager()
 # =============================================================================
 
 class MessageCompressor:
-    """消息压缩器 - 缩短字段名和 gzip 压缩"""
+    """Message compressor - shortens field names and gzip compression"""
 
-    # 字段名映射（缩短常用字段）
+    # Field name mapping (shortens common fields)
     FIELD_MAP = {
         'sensors': 's',
         'ros2': 'r2',
@@ -419,7 +430,7 @@ class MessageCompressor:
 
     @classmethod
     def minify_json(cls, data: dict) -> dict:
-        """缩短 JSON 字段名"""
+        """Shorten JSON field names"""
         if isinstance(data, dict):
             return {
                 cls.FIELD_MAP.get(k, k): cls.minify_json(v)
@@ -431,13 +442,13 @@ class MessageCompressor:
 
     @classmethod
     def compress(cls, data: dict) -> bytes:
-        """压缩消息（minify + gzip）"""
+        """Compress message (minify + gzip)"""
         import gzip as gzip_module
-        # 先缩短字段名
+        # First shorten field names
         minified = cls.minify_json(data)
-        # 转 JSON
+        # Convert to JSON
         json_str = json.dumps(minified, separators=(',', ':'))
-        # Gzip 压缩
+        # Gzip compress
         return gzip_module.compress(json_str.encode())
 
 
@@ -446,19 +457,19 @@ class MessageCompressor:
 # =============================================================================
 
 async def broadcast_alert(alert: Any) -> None:
-    """立即推送新告警到所有 WebSocket 客户端
+    """Immediately push new alert to all WebSocket clients
 
     This function is called by AlertStore when a new alert is added.
 
     Args:
-        alert: Alert 对象（来自 alerts.py）
+        alert: Alert object (from alerts.py)
     """
     try:
-        # 转换 Alert 对象为字典
+        # Convert Alert object to dict
         if hasattr(alert, '_asdict'):
             alert_dict = alert._asdict()
         else:
-            # 如果是普通对象，提取属性
+            # For plain objects, extract attributes
             alert_dict = {
                 'id': getattr(alert, 'id', None),
                 'sensor': getattr(alert, 'sensor', ''),
@@ -936,7 +947,7 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
             final_message = summary.get('message', '') or 'Sensor disconnected'
 
         # Only upgrade status when physical connectivity is confirmed
-        if sensor_name not in ['uli_lidar', 'battery'] and node_available is not None:
+        if sensor_name not in ['uli_lidar', 'battery', 'pi5_sensors'] and node_available is not None:
             if physical_connected and node_available and topic_available:
                 # Both node and topic available - status is OK
                 final_status = 'ok'
@@ -994,6 +1005,14 @@ def _check_single_sensor(sensor_name: str) -> Dict[str, Any]:
                 result['water_quality'] = summary['water_quality']
             if 'ups' in summary:
                 result['ups'] = summary['ups']
+
+            logger.info(
+                "[PI5_DEBUG] _check_single_sensor summary_keys=%s result_status=%s has_wq=%s has_ups=%s",
+                sorted(summary.keys()),
+                result.get('status'),
+                bool(result.get('water_quality')),
+                bool(result.get('ups')),
+            )
 
         return result
     except Exception as e:
@@ -1109,6 +1128,15 @@ async def _broadcast_sensors_incremental() -> Dict[str, Any]:
 
         sensors[name] = result
 
+        if name == 'pi5_sensors':
+            logger.info(
+                "[PI5_DEBUG] broadcast partial status=%s has_wq=%s has_ups=%s keys=%s",
+                result.get('status'),
+                bool(result.get('water_quality')),
+                bool(result.get('ups')),
+                sorted(result.keys()),
+            )
+
         await manager.broadcast_to_channel(
             Channel.SENSORS,
             {
@@ -1124,6 +1152,16 @@ async def _broadcast_sensors_incremental() -> Dict[str, Any]:
     # Final full summary update (keeps backward compatibility)
     result = _summarize_sensor_results(sensors)
     _cache_set('sensors:status', result)
+
+    pi5_data = result.get('sensors', {}).get('pi5_sensors')
+    if pi5_data is not None:
+        logger.info(
+            "[PI5_DEBUG] broadcast final status=%s has_wq=%s has_ups=%s keys=%s",
+            pi5_data.get('status'),
+            bool(pi5_data.get('water_quality')),
+            bool(pi5_data.get('ups')),
+            sorted(pi5_data.keys()),
+        )
 
     await manager.broadcast_to_channel(
         Channel.SENSORS,
@@ -1170,6 +1208,9 @@ def _collect_connectivity_sync(sensor_name: str) -> Dict[str, Any]:
         elif sensor_name == 'battery':
             result = monitor._check_i2c_connection()
             connected_value = result.get('connected', None)
+        elif sensor_name == 'pi5_sensors':
+            result = monitor._check_connectivity()
+            connected_value = result.get('reachable', False)
     except Exception as e:
         logger.debug(f"[connectivity] {sensor_name} check failed: {e}")
         connected_value = None
@@ -1230,6 +1271,7 @@ def _get_topic_available(metrics: dict, sensor_name: str) -> Optional[bool]:
         'camera': '/image_raw',
         'imu': '/imu/data',
         'thruster': '/thruster_status_pwm',
+        'pi5_sensors': '/water_quality',
     }
 
     # Topic patterns for fallback matching
@@ -1363,6 +1405,7 @@ def _get_node_available(sensor_name: str) -> Optional[bool]:
         'camera': ['galaxy_camera', 'camera'],
         'imu': ['sbg_device', 'imu'],
         'thruster': ['thruster_wifi_node', 'thruster'],
+        'pi5_sensors': ['thruster_wifi_node'],
     }
 
     if sensor_name not in node_patterns:
@@ -1521,18 +1564,20 @@ def collect_sensor_status() -> Dict[str, Any]:
                 topics = metrics.get('topics', {})
                 voltages = topics.get('voltages', {})
                 connected = 'Connected' if topics.get('data_available') else 'Disconnected'
+            elif name == 'pi5_sensors':
+                connected = 'Connected' if metrics.get('reachable') else 'Disconnected'
 
             # Extract topic and node availability for frontend display
             topic_available = _get_topic_available(metrics, name)
             node_available = _get_node_available(name)
 
             # Calculate final status based on node/topic availability
-            # Skip uli_lidar (no ROS driver)
+            # Skip uli_lidar (no ROS driver) and pi5_sensors (MQTT-only)
             final_status = summary['status']
             final_color = summary['color']
             final_message = summary.get('message', '')
 
-            if name != 'uli_lidar' and node_available is not None:
+            if name not in ['uli_lidar', 'pi5_sensors'] and node_available is not None:
                 if node_available and topic_available:
                     # Both node and topic available - status is OK
                     final_status = 'ok'
@@ -1559,7 +1604,7 @@ def collect_sensor_status() -> Dict[str, Any]:
                     final_status = summary['status']
                     final_color = summary['color']
 
-            sensors[name] = {
+            sensor_result = {
                 'status': final_status,
                 'color': final_color,
                 'value': summary.get('value', 'N/A'),
@@ -1579,6 +1624,15 @@ def collect_sensor_status() -> Dict[str, Any]:
                 'data_updated_at': summary.get('data_updated_at'),
                 'connection_info': summary.get('connection_info', {}),
             }
+
+            # Pi5-specific fields (MQTT water quality / UPS)
+            if name == 'pi5_sensors':
+                if 'water_quality' in summary:
+                    sensor_result['water_quality'] = summary['water_quality']
+                if 'ups' in summary:
+                    sensor_result['ups'] = summary['ups']
+
+            sensors[name] = sensor_result
         except Exception as e:
             logger.debug(f"Error collecting {name}: {e}")
             sensors[name] = {
@@ -1689,25 +1743,25 @@ def collect_active_alerts() -> List[Dict]:
 # Background Broadcaster Task
 # =============================================================================
 
-# 频道配置（按更新频率分离）
+# Channel configuration (separated by update frequency)
 CHANNEL_CONFIG = {
     Channel.SENSORS: {
-        "interval": 0.5,      # 0.5 秒更新 (实时响应)
-        "priority": "high",   # 高优先级
-        "cache_ttl": 0.5,     # 使用 0.5 秒缓存 (最小化延迟)
+        "interval": 0.5,      # 0.5s update (real-time response)
+        "priority": "high",   # High priority
+        "cache_ttl": 0.5,     # 0.5s cache (minimize latency)
     },
     Channel.CONNECTIVITY: {
-        "interval": 0.5,      # 连接性快速更新
+        "interval": 0.5,      # Connectivity fast update
         "priority": "high",
         "cache_ttl": 0,
     },
     Channel.ALERTS: {
-        "interval": 0,        # 实时推送（由回调触发）
+        "interval": 0,        # Real-time push (triggered by callback)
         "priority": "critical",
         "cache_ttl": 0,
     },
     Channel.ROS2: {
-        "interval": 10,       # 10 秒更新
+        "interval": 10,       # 10s update
         "priority": "low",
         "cache_ttl": 5,
     },
@@ -1841,13 +1895,13 @@ async def _channel_broadcaster_loop(channel: Channel, interval: float) -> None:
 
 
 async def background_broadcaster_channelized():
-    """分频道的后台广播器 - 不同频道使用不同更新频率"""
+    """Per-channel background broadcaster - different channels use different update frequencies"""
     tasks = []
 
     for channel, config in CHANNEL_CONFIG.items():
         interval = config["interval"]
 
-        # 实时告警由回调处理，跳过
+        # Real-time alerts handled by callback, skip
         if interval == 0:
             continue
 
@@ -1947,7 +2001,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Access the web interface at: http://localhost:5000")
     logger.info(f"API docs at: http://localhost:5000/docs")
 
-    # 启动后台初始化任务 (非阻塞，服务立即可用)
+    # Start background init task (non-blocking, service available immediately)
     asyncio.create_task(background_init())
 
     # Start background broadcaster (new channelized version)
@@ -1988,24 +2042,24 @@ async def lifespan(app: FastAPI):
 # =============================================================================
 
 async def background_init():
-    """后台初始化任务 - 延迟执行非关键操作，让服务快速启动"""
+    """Background init task - defers non-critical operations for fast startup"""
     try:
-        # 延迟初始化数据库和缓存，避免阻塞服务启动
-        await asyncio.sleep(0.5)  # 让服务先完全启动
+        # Defer database and cache initialization to avoid blocking service startup
+        await asyncio.sleep(0.5)  # Let the service fully start first
 
-        # 1. 预热缓存
+        # 1. Warm up cache
         await warm_cache_on_startup()
 
-        # 2. 初始化告警存储和回调 (延迟到后台)
+        # 2. Initialize alert storage and callback (deferred to background)
         from alerts import get_alert_store
         alert_store = get_alert_store()
         alert_store.set_alert_callback(broadcast_alert)
         logger.info("[WS] Alert callback registered (background)")
 
-        # 2.5 初始化事件统计缓存回调
+        # 2.5 Initialize event statistics cache callback
         _ensure_event_store_callback()
 
-        # 3. 记录启动事件 (延迟到后台)
+        # 3. Log startup event (deferred to background)
         if EVENT_LOG_CONFIG.get("enabled", True):
             event_store = get_event_store()
             event_store.log_event(EventLog(
@@ -2132,18 +2186,18 @@ async def events(request: Request):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket 端点 - 支持订阅/取消订阅"""
+    """WebSocket endpoint - supports subscribe/unsubscribe"""
     await manager.connect(websocket)
 
     try:
-        # Send initial full state（包含订阅确认）
+        # Send initial full state (includes subscription confirmation)
         await manager.send_full_state(websocket)
 
-        # 处理客户端消息
+        # Handle client messages
         while True:
             data = await websocket.receive_text()
 
-            # 处理订阅请求
+            # Handle subscription requests
             if data == "ping":
                 await websocket.send_text("pong")
             elif data.startswith("subscribe:"):
@@ -2173,7 +2227,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "timestamp": time.time()
                     })
                 except ValueError:
-                    pass  # 忽略无效频道
+                    pass  # Ignore invalid channel
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:

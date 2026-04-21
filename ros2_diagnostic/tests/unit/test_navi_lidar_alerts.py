@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-NaviLiDAR 告警触发测试
+NaviLiDAR Alert Trigger Tests
 
-测试 NaviLidarDiagnostic 的告警记录功能:
-- 丢帧告警 (critical 和 warning)
-- 点数降低告警 (critical 和 warning)
-- 告警冷却机制
-- 正常情况不触发告警
+Test NaviLidarDiagnostic alert recording functionality:
+- Frame loss alerts (critical and warning)
+- Point count drop alerts (critical and warning)
+- Alert cooldown mechanism
+- No alerts triggered under normal conditions
 """
 
 import pytest
@@ -21,20 +21,20 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 class TestNaviLidarAlertTriggering:
-    """Navi LiDAR 告警触发逻辑测试"""
+    """Navi LiDAR alert trigger logic tests"""
 
     @pytest.fixture
     def diagnostic(self, mock_navi_lidar_config, temp_db_path):
-        """创建 NaviLidarDiagnostic 实例"""
-        # 重置模块
+        """Create a NaviLidarDiagnostic instance"""
+        # Reset the module
         if 'alerts' in sys.modules:
             del sys.modules['alerts']
 
-        # 导入并配置 AlertStore 使用临时数据库
+        # Import and configure AlertStore to use a temporary database
         from alerts import AlertStore
         AlertStore._instance = None
 
-        # 创建 store 并确保其初始化
+        # Create store and ensure it is initialized
         store = AlertStore(db_path=temp_db_path)
 
         from diagnostics.sensor_monitor.navi_lidar import NaviLidarDiagnostic
@@ -43,13 +43,13 @@ class TestNaviLidarAlertTriggering:
 
     @patch('diagnostics.sensor_monitor.navi_lidar.ping_host')
     def test_frame_loss_critical_alert(self, mock_ping, diagnostic):
-        """测试严重丢帧触发 critical 告警
+        """Test severe frame loss triggering a critical alert
 
-        当频率 < min_frequency * 0.5 时应触发 critical 告警
+        A critical alert should be triggered when frequency < min_frequency * 0.5
         """
         mock_ping.return_value = {'reachable': True, 'avg_time_ms': 1.5, 'packet_loss': 0}
 
-        # 模拟低频率统计数据 (3.5 < 8.0 * 0.5 = 4.0)
+        # Simulate low frequency statistics (3.5 < 8.0 * 0.5 = 4.0)
         with patch.object(diagnostic, '_log_parser') as mock_parser:
             mock_parser.get_statistics.return_value = Mock(
                 frequency=3.5,
@@ -62,7 +62,7 @@ class TestNaviLidarAlertTriggering:
                 time_since_last_frame=0.1
             )
 
-            # 模拟 ROS2 系统运行
+            # Simulate ROS2 system running
             with patch.object(diagnostic, '_get_ros2_monitor') as mock_monitor_getter:
                 mock_monitor = Mock()
                 mock_monitor.is_system_running = Mock(return_value=True)
@@ -74,14 +74,14 @@ class TestNaviLidarAlertTriggering:
                         mock_helper.get_topic_names.return_value = ['/navi_lidar/points']
                         mock_ros2.return_value = mock_helper
 
-                        # 执行诊断检查
+                        # Execute diagnostic check
                         result = diagnostic.check()
 
-        # 验证诊断结果
+        # Verify diagnostic result
         from diagnostics.base import StatusLevel
         assert result.status == StatusLevel.CRITICAL
 
-        # 验证告警被记录
+        # Verify alert was recorded
         from alerts import get_alert_store
         store = get_alert_store()
         alerts = store.get_active_alerts(sensor='navi_lidar')
@@ -93,13 +93,13 @@ class TestNaviLidarAlertTriggering:
 
     @patch('diagnostics.sensor_monitor.navi_lidar.ping_host')
     def test_frame_loss_warning_alert(self, mock_ping, diagnostic):
-        """测试丢帧触发 warning 告警
+        """Test frame loss triggering a warning alert
 
-        当频率 < min_frequency 但 >= min_frequency * 0.5 时应触发 warning 告警
+        A warning alert should be triggered when frequency < min_frequency but >= min_frequency * 0.5
         """
         mock_ping.return_value = {'reachable': True, 'avg_time_ms': 1.5, 'packet_loss': 0}
 
-        # 模拟中低频率统计数据 (6.5 < 8.0, but >= 4.0)
+        # Simulate medium-low frequency statistics (6.5 < 8.0, but >= 4.0)
         with patch.object(diagnostic, '_log_parser') as mock_parser:
             mock_parser.get_statistics.return_value = Mock(
                 frequency=6.5,
@@ -125,11 +125,11 @@ class TestNaviLidarAlertTriggering:
 
                         result = diagnostic.check()
 
-        # 验证诊断结果
+        # Verify diagnostic result
         from diagnostics.base import StatusLevel
         assert result.status == StatusLevel.WARNING
 
-        # 验证告警
+        # Verify alert
         from alerts import get_alert_store
         store = get_alert_store()
         alerts = store.get_active_alerts(sensor='navi_lidar')
@@ -141,17 +141,17 @@ class TestNaviLidarAlertTriggering:
 
     @patch('diagnostics.sensor_monitor.navi_lidar.ping_host')
     def test_point_count_critical_alert(self, mock_ping, diagnostic):
-        """测试点数严重不足触发 critical 告警
+        """Test severely insufficient point count triggering a critical alert
 
-        当点数 < min_points * 0.5 时应触发 critical 告警
+        A critical alert should be triggered when point count < min_points * 0.5
         """
         mock_ping.return_value = {'reachable': True, 'avg_time_ms': 1.5, 'packet_loss': 0}
 
-        # 模拟极低点数 (20000 < 50000 * 0.5 = 25000)
+        # Simulate very low point count (20000 < 50000 * 0.5 = 25000)
         with patch.object(diagnostic, '_log_parser') as mock_parser:
             mock_parser.get_statistics.return_value = Mock(
-                frequency=10.0,  # 正常频率
-                avg_points=20000,  # 严重不足
+                frequency=10.0,  # Normal frequency
+                avg_points=20000,  # Severely insufficient
                 frame_count=100,
                 min_points=18000,
                 max_points=22000,
@@ -173,7 +173,7 @@ class TestNaviLidarAlertTriggering:
 
                         result = diagnostic.check()
 
-        # 验证告警
+        # Verify alert
         from alerts import get_alert_store
         store = get_alert_store()
         alerts = store.get_active_alerts(sensor='navi_lidar')
@@ -185,13 +185,13 @@ class TestNaviLidarAlertTriggering:
 
     @patch('diagnostics.sensor_monitor.navi_lidar.ping_host')
     def test_point_count_warning_alert(self, mock_ping, diagnostic):
-        """测试点数降低触发 warning 告警
+        """Test point count drop triggering a warning alert
 
-        当点数 < min_points 但 >= min_points * 0.5 时应触发 warning 告警
+        A warning alert should be triggered when point count < min_points but >= min_points * 0.5
         """
         mock_ping.return_value = {'reachable': True, 'avg_time_ms': 1.5, 'packet_loss': 0}
 
-        # 模拟偏低点数 (42000 < 50000, but >= 25000)
+        # Simulate low point count (42000 < 50000, but >= 25000)
         with patch.object(diagnostic, '_log_parser') as mock_parser:
             mock_parser.get_statistics.return_value = Mock(
                 frequency=10.0,
@@ -217,7 +217,7 @@ class TestNaviLidarAlertTriggering:
 
                         result = diagnostic.check()
 
-        # 验证告警
+        # Verify alert
         from alerts import get_alert_store
         store = get_alert_store()
         alerts = store.get_active_alerts(sensor='navi_lidar')
@@ -228,14 +228,14 @@ class TestNaviLidarAlertTriggering:
 
     @patch('diagnostics.sensor_monitor.navi_lidar.ping_host')
     def test_no_alert_when_normal(self, mock_ping, diagnostic):
-        """测试正常情况不触发告警"""
+        """Test that no alert is triggered under normal conditions"""
         mock_ping.return_value = {'reachable': True, 'avg_time_ms': 1.5, 'packet_loss': 0}
 
-        # 模拟正常统计数据
+        # Simulate normal statistics
         with patch.object(diagnostic, '_log_parser') as mock_parser:
             mock_parser.get_statistics.return_value = Mock(
-                frequency=10.0,  # 正常 (>= 8.0)
-                avg_points=115200,  # 正常 (>= 50000)
+                frequency=10.0,  # Normal (>= 8.0)
+                avg_points=115200,  # Normal (>= 50000)
                 frame_count=100,
                 min_points=110000,
                 max_points=120000,
@@ -257,11 +257,11 @@ class TestNaviLidarAlertTriggering:
 
                         result = diagnostic.check()
 
-        # 验证状态正常
+        # Verify status is OK
         from diagnostics.base import StatusLevel
         assert result.status == StatusLevel.OK
 
-        # 验证没有告警
+        # Verify no alerts
         from alerts import get_alert_store
         store = get_alert_store()
         alerts = store.get_active_alerts(sensor='navi_lidar')
@@ -269,9 +269,9 @@ class TestNaviLidarAlertTriggering:
 
     @patch('diagnostics.sensor_monitor.navi_lidar.ping_host')
     def test_alert_cooldown(self, mock_ping, diagnostic):
-        """测试告警冷却机制 - 避免重复告警
+        """Test alert cooldown mechanism - avoid duplicate alerts
 
-        连续两次检查相同问题应该只记录一次告警（在冷却期内）
+        Two consecutive checks of the same issue should only record one alert (within cooldown period)
         """
         mock_ping.return_value = {'reachable': True, 'avg_time_ms': 1.5, 'packet_loss': 0}
 
@@ -298,7 +298,7 @@ class TestNaviLidarAlertTriggering:
                         mock_helper.get_topic_names.return_value = ['/navi_lidar/points']
                         mock_ros2.return_value = mock_helper
 
-                        # 第一次检查
+                        # First check
                         diagnostic.check()
 
                         from alerts import get_alert_store
@@ -306,20 +306,20 @@ class TestNaviLidarAlertTriggering:
                         alerts_after_first = store.get_active_alerts(sensor='navi_lidar')
                         first_count = len(alerts_after_first)
 
-                        # 立即第二次检查（在冷却期内）
+                        # Immediately run a second check (within cooldown period)
                         diagnostic.check()
                         alerts_after_second = store.get_active_alerts(sensor='navi_lidar')
                         second_count = len(alerts_after_second)
 
-                        # 告警数量不应该增加（由于冷却机制）
+                        # Alert count should not increase (due to cooldown mechanism)
                         assert second_count == first_count
 
     @patch('diagnostics.sensor_monitor.navi_lidar.ping_host')
     def test_combined_critical_alerts(self, mock_ping, diagnostic):
-        """测试同时触发多个 critical 告警"""
+        """Test triggering multiple critical alerts simultaneously"""
         mock_ping.return_value = {'reachable': True, 'avg_time_ms': 1.5, 'packet_loss': 0}
 
-        # 模拟同时有丢帧和点数不足
+        # Simulate both frame loss and insufficient point count simultaneously
         with patch.object(diagnostic, '_log_parser') as mock_parser:
             mock_parser.get_statistics.return_value = Mock(
                 frequency=3.5,  # Critical
@@ -345,32 +345,32 @@ class TestNaviLidarAlertTriggering:
 
                         result = diagnostic.check()
 
-        # 验证状态
+        # Verify status
         from diagnostics.base import StatusLevel
         assert result.status == StatusLevel.CRITICAL
 
-        # 验证两个告警都被记录
+        # Verify both alerts were recorded
         from alerts import get_alert_store
         store = get_alert_store()
         alerts = store.get_active_alerts(sensor='navi_lidar')
 
-        assert len(alerts) >= 2  # 可能同时有两个告警
+        assert len(alerts) >= 2  # May have two alerts simultaneously
 
 
 class TestNaviLidarAlertMetadata:
-    """测试告警元数据正确性"""
+    """Test alert metadata correctness"""
 
     @pytest.fixture
     def diagnostic(self, mock_navi_lidar_config, temp_db_path):
-        # 重置模块
+        # Reset the module
         if 'alerts' in sys.modules:
             del sys.modules['alerts']
 
-        # 导入并配置 AlertStore 使用临时数据库
+        # Import and configure AlertStore to use a temporary database
         from alerts import AlertStore
         AlertStore._instance = None
 
-        # 创建 store 并确保其初始化
+        # Create store and ensure it is initialized
         store = AlertStore(db_path=temp_db_path)
 
         from diagnostics.sensor_monitor.navi_lidar import NaviLidarDiagnostic
@@ -378,7 +378,7 @@ class TestNaviLidarAlertMetadata:
 
     @patch('diagnostics.sensor_monitor.navi_lidar.ping_host')
     def test_alert_metadata_contains_stats(self, mock_ping, diagnostic):
-        """测试告警 metadata 包含完整统计信息"""
+        """Test that alert metadata contains complete statistics"""
         mock_ping.return_value = {'reachable': True, 'avg_time_ms': 1.5, 'packet_loss': 0}
 
         with patch.object(diagnostic, '_log_parser') as mock_parser:
@@ -406,14 +406,14 @@ class TestNaviLidarAlertMetadata:
 
                         diagnostic.check()
 
-        # 验证 metadata 包含正确信息
+        # Verify metadata contains correct information
         from alerts import get_alert_store
         store = get_alert_store()
         alerts = store.get_active_alerts(sensor='navi_lidar')
 
         assert len(alerts) > 0
 
-        # 解析并验证 metadata
+        # Parse and verify metadata
         alert = alerts[0]
         metadata = json.loads(alert.metadata)
 

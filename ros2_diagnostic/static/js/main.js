@@ -140,8 +140,8 @@ class WSConnection {
     }
 
     /**
-     * 订阅频道
-     * @param {string} channel - 频道名称 (sensors, alerts, ros2, ros2_control, rosbag)
+     * Subscribe to a channel
+     * @param {string} channel - Channel name (sensors, alerts, ros2, ros2_control, rosbag)
      */
     subscribe(channel) {
         if (this.ws?.readyState === WebSocket.OPEN) {
@@ -151,8 +151,8 @@ class WSConnection {
     }
 
     /**
-     * 取消订阅频道
-     * @param {string} channel - 频道名称
+     * Unsubscribe from a channel
+     * @param {string} channel - Channel name
      */
     unsubscribe(channel) {
         if (this.ws?.readyState === WebSocket.OPEN) {
@@ -162,13 +162,13 @@ class WSConnection {
     }
 
     /**
-     * 设置只接收告警（低带宽模式）
+     * Set alerts-only mode (low bandwidth)
      */
     lowBandwidthMode() {
-        // 取消订阅传感器
+        // Unsubscribe from sensors
         this.unsubscribe('sensors');
         this.unsubscribe('ros2');
-        // 只保留告警
+        // Keep only alerts
         console.log('[WS] Low bandwidth mode enabled (alerts only)');
     }
 
@@ -190,6 +190,7 @@ class WSConnection {
 function handleFullState(data, timestamp) {
     // Handle initial full state on connection
     console.log('[WS] Received full state');
+    console.log('[PI5_DEBUG] handleFullState pi5 =', data?.sensors?.sensors?.pi5_sensors || null);
 
     if (data.sensors) latestState.sensors = data.sensors;
     if (data.ros2) latestState.ros2 = data.ros2;
@@ -275,6 +276,7 @@ function handleAlert(data, timestamp) {
 function handleSensorsUpdate(data, timestamp) {
     // Handle sensors channel update
     console.log('[WS] Received sensors update');
+    console.log('[PI5_DEBUG] handleSensorsUpdate incoming =', data?.sensors?.pi5_sensors || data?.sensors || null);
     if (data && data.sensors) {
         if (data.partial) {
             if (!latestState.sensors || !latestState.sensors.sensors) {
@@ -285,6 +287,7 @@ function handleSensorsUpdate(data, timestamp) {
             latestState.sensors = data;
         }
     }
+    console.log('[PI5_DEBUG] handleSensorsUpdate merged =', latestState?.sensors?.sensors?.pi5_sensors || null);
     if (typeof updateSensorsDisplay === 'function') updateSensorsDisplay(data);
     if (hasSensorUI()) {
         markInitialDataUpdated();

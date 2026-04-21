@@ -193,14 +193,14 @@ def check_ros2_status(base_url: str) -> bool:
             if data.get('success') and data.get('data', {}).get('running'):
                 _ros2_running_state["running"] = True
                 _ros2_running_state["checked"] = True
-                logger.info("[INFO] ROS2 系统正在运行 ✓")
+                logger.info("[INFO] ROS2 system is running ✓")
                 return True
     except Exception as e:
         logger.debug(f"ROS2 status check failed: {e}")
 
     _ros2_running_state["running"] = False
     _ros2_running_state["checked"] = True
-    logger.warning("[WARNING] ROS2 系统未运行，录制测试将被跳过")
+    logger.warning("[WARNING] ROS2 system is not running, recording tests will be skipped")
     return False
 
 
@@ -227,41 +227,41 @@ def ros2_running(base_url: str) -> bool:
 
 @pytest.fixture
 def temp_db_path(tmp_path):
-    """临时数据库路径 for AlertStore testing"""
+    """Temporary database path for AlertStore testing"""
     return str(tmp_path / "test_alerts.db")
 
 
 @pytest.fixture
 def fresh_alert_store(temp_db_path):
-    """每次测试创建新的 AlertStore 实例
+    """Create a new AlertStore instance for each test
 
-    这个 fixture 会:
-    1. 重置单例模块
-    2. 创建新的 AlertStore
-    3. 使用临时数据库路径
-    4. 测试结束后关闭连接
+    This fixture will:
+    1. Reset the singleton module
+    2. Create a new AlertStore
+    3. Use a temporary database path
+    4. Close the connection after the test
     """
-    # 重置 alerts 模块以清除单例
+    # Reset alerts module to clear singleton
     if 'alerts' in sys.modules:
         del sys.modules['alerts']
 
     from alerts import AlertStore
-    # 重置 AlertStore 单例类变量
+    # Reset AlertStore singleton class variable
     AlertStore._instance = None
 
     store = AlertStore(db_path=temp_db_path)
 
     yield store
 
-    # 清理
+    # Cleanup
     store.close()
-    # 重置单例以便下次测试
+    # Reset singleton for next test
     AlertStore._instance = None
 
 
 @pytest.fixture
 def sample_alert():
-    """示例 Alert 对象 - 单个告警"""
+    """Sample Alert object - single alert"""
     from alerts import Alert
     return Alert(
         id=1,
@@ -280,12 +280,12 @@ def sample_alert():
 
 @pytest.fixture
 def sample_alerts():
-    """多个示例 Alert 对象
+    """Multiple sample Alert objects
 
-    包含:
-    - 1 个 navi_lidar critical 告警 (活动)
-    - 1 个 navi_lidar warning 告警 (活动)
-    - 1 个 camera critical 告警 (已解决)
+    Contains:
+    - 1 navi_lidar critical alert (active)
+    - 1 navi_lidar warning alert (active)
+    - 1 camera critical alert (resolved)
     """
     from alerts import Alert
     return [
@@ -331,7 +331,7 @@ def sample_alerts():
 
 @pytest.fixture
 def mock_navi_lidar_config():
-    """模拟 Navi LiDAR 配置 for alert testing"""
+    """Mocked Navi LiDAR configuration for alert testing"""
     return {
         'SENSOR_THRESHOLDS': {
             'navi_lidar': {
@@ -354,23 +354,23 @@ def mock_navi_lidar_config():
 
 @pytest.fixture
 def client(temp_db_path):
-    """FastAPI 测试客户端
+    """FastAPI test client
 
-    为 Alert API 测试提供配置好的 FastAPI 测试客户端
+    Provides a configured FastAPI test client for Alert API testing
     """
-    # 重置模块
+    # Reset modules
     for mod in ['alerts', 'app', 'main']:
         if mod in sys.modules:
             del sys.modules[mod]
 
-    # 导入 alerts 模块并重置单例
+    # Import alerts module and reset singleton
     from alerts import AlertStore
     AlertStore._instance = None
 
-    # 导入 main (FastAPI app)
+    # Import main (FastAPI app)
     from main import app
 
-    # 确保 AlertStore 使用临时数据库
+    # Ensure AlertStore uses temporary database
     AlertStore._instance = None
     store = AlertStore(db_path=temp_db_path)
 
@@ -383,7 +383,7 @@ def client(temp_db_path):
 
 @pytest.fixture
 def mock_ping_success():
-    """模拟 ping 成功响应"""
+    """Mock successful ping response"""
     return {
         'reachable': True,
         'avg_time_ms': 1.5,
@@ -395,7 +395,7 @@ def mock_ping_success():
 
 @pytest.fixture
 def mock_ping_failure():
-    """模拟 ping 失败响应"""
+    """Mock failed ping response"""
     return {
         'reachable': False,
         'avg_time_ms': None,

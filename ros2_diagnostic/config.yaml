@@ -240,7 +240,7 @@ monitoring:
   # Cache TTL (Time-To-Live) for different data types (seconds)
   cache_ttl:
     ros2: 3                # ROS2 node list cache
-    sensors: 0.2             # Sensor diagnostic results cache (实时更新)
+    sensors: 0.2             # Sensor diagnostic results cache (real-time update)
     topics: 3              # Topic info cache
     frequency: 5           # Frequency measurement cache
 

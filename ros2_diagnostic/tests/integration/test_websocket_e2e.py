@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-WebSocket 端到端集成测试
+WebSocket end-to-end integration tests
 
-测试完整的 WebSocket 工作流:
-- 客户端连接 → 接收 full_state → 接收 state_update → 断开
-- 多客户端并发连接和广播
-- 客户端重连场景
-- 与 HTTP API 的协同工作
+Tests the complete WebSocket workflow:
+- Client connect -> receive full_state -> receive state_update -> disconnect
+- Multi-client concurrent connections and broadcasting
+- Client reconnection scenarios
+- Integration with HTTP API
 
 Note: Using synchronous TestClient for WebSocket testing
 """
@@ -31,32 +31,32 @@ except ImportError:
 
 
 class TestWebSocketE2E:
-    """WebSocket 端到端测试"""
+    """WebSocket end-to-end tests"""
 
     def test_complete_client_lifecycle(self):
-        """测试完整的客户端生命周期
+        """Test complete client lifecycle
 
-        1. 连接到 WebSocket
-        2. 接收 full_state
-        3. 接收至少一个 state_update
-        4. 断开连接
+        1. Connect to WebSocket
+        2. Receive full_state
+        3. Receive at least one state_update
+        4. Disconnect
         """
         client = TestClient(app)
 
         with client.websocket_connect("/ws") as websocket:
-            # 步骤 1 & 2: 连接并接收 full_state
+            # Steps 1 & 2: Connect and receive full_state
             first_message = websocket.receive_json()
             assert first_message["type"] == "full_state", "First message should be full_state"
             assert "data" in first_message
             assert "timestamp" in first_message
 
-            # 验证 full_state 包含所有数据
+            # Verify full_state contains all data
             state = first_message["data"]
             required_keys = ["sensors", "ros2", "ros2_control", "rosbag", "alerts"]
             for key in required_keys:
                 assert key in state, f"full_state should contain {key}"
 
-            # 步骤 3: 接收 state_update
+            # Step 3: Receive state_update
             try:
                 update_message = websocket.receive_json(timeout=7)
                 assert update_message["type"] == "state_update", "Second message should be state_update"
@@ -65,19 +65,19 @@ class TestWebSocketE2E:
             except Exception as e:
                 pytest.skip(f"State update not received in time: {e}")
 
-            # 步骤 4: 连接在此处自动关闭 (退出上下文)
+            # Step 4: Connection auto-closes here (exiting context)
 
     def test_multiple_state_updates(self):
-        """测试接收连续的 state_update 消息"""
+        """Test receiving consecutive state_update messages"""
         client = TestClient(app)
 
         with client.websocket_connect("/ws") as websocket:
-            # 接收 full_state
+            # Receive full_state
             _ = websocket.receive_json()
 
-            # 尝试接收多个 state_update
+            # Try to receive multiple state_updates
             updates_received = 0
-            max_wait = 15  # 最多等待15秒
+            max_wait = 15  # Max wait 15 seconds
             start_time = time.time()
 
             try:
@@ -90,22 +90,22 @@ class TestWebSocketE2E:
             except Exception:
                 pass
 
-            # 至少应该收到一个更新
+            # Should have received at least one update
             assert updates_received >= 1, f"Expected at least 1 update, got {updates_received}"
 
     def test_reconnect_scenario(self):
-        """测试客户端重连场景
+        """Test client reconnection scenario
 
-        模拟:
-        1. 客户端连接
-        2. 接收数据
-        3. 断开
-        4. 重新连接
-        5. 再次接收 full_state
+        Simulates:
+        1. Client connects
+        2. Receives data
+        3. Disconnects
+        4. Reconnects
+        5. Receives full_state again
         """
         client = TestClient(app)
 
-        # 第一次连接
+        # First connection
         with client.websocket_connect("/ws") as websocket:
             first_message = websocket.receive_json()
             assert first_message["type"] == "full_state"
@@ -114,42 +114,42 @@ class TestWebSocketE2E:
             except:
                 pass
 
-        # 模拟短暂延迟
+        # Simulate brief delay
         time.sleep(0.5)
 
-        # 重新连接
+        # Reconnect
         with client.websocket_connect("/ws") as websocket:
             reconnect_message = websocket.receive_json()
             assert reconnect_message["type"] == "full_state"
-            # 验证重连后能正常工作
+            # Verify reconnection works properly
             websocket.send_text("ping")
             pong = websocket.receive_text()
             assert pong == "pong"
 
 
 class TestWebSocketBroadcast:
-    """WebSocket 广播测试"""
+    """WebSocket broadcast tests"""
 
     def test_broadcast_to_multiple_clients(self):
-        """测试向多个客户端广播消息"""
+        """Test broadcasting to multiple clients"""
         client = TestClient(app)
 
         messages_received = {"client1": [], "client2": []}
 
         def client_handler(client_id: str):
             with client.websocket_connect("/ws") as websocket:
-                # 接收 full_state
+                # Receive full_state
                 msg1 = websocket.receive_json()
                 messages_received[client_id].append(msg1["type"])
 
-                # 等待可能的 state_update
+                # Wait for possible state_update
                 try:
                     msg2 = websocket.receive_json(timeout=7)
                     messages_received[client_id].append(msg2["type"])
                 except:
                     pass
 
-        # 使用线程模拟并发连接
+        # Use threads to simulate concurrent connections
         t1 = threading.Thread(target=client_handler, args=("client1",))
         t2 = threading.Thread(target=client_handler, args=("client2",))
 
@@ -159,12 +159,12 @@ class TestWebSocketBroadcast:
         t1.join(timeout=10)
         t2.join(timeout=10)
 
-        # 两个客户端都应该收到 full_state
+        # Both clients should have received full_state
         assert "full_state" in messages_received["client1"]
         assert "full_state" in messages_received["client2"]
 
     def test_concurrent_connections(self):
-        """测试并发连接数限制"""
+        """Test concurrent connection limit"""
         client = TestClient(app)
 
         results = []
@@ -178,7 +178,7 @@ class TestWebSocketBroadcast:
             except Exception as e:
                 results.append((client_id, False))
 
-        # 创建多个并发连接
+        # Create multiple concurrent connections
         threads = []
         for i in range(5):
             t = threading.Thread(target=connect_and_wait, args=(f"client_{i}",))
@@ -188,23 +188,23 @@ class TestWebSocketBroadcast:
         for t in threads:
             t.join(timeout=10)
 
-        # 验证至少有部分连接成功
+        # Verify at least some connections succeeded
         successful = sum(1 for r in results if r[1])
         assert successful >= 3, f"Expected at least 3 successful connections, got {successful}"
 
 
 class TestWebSocketWithAlerts:
-    """WebSocket 与告警系统集成测试"""
+    """WebSocket and alert system integration tests"""
 
     def test_alerts_in_full_state(self, temp_db_path):
-        """测试 full_state 包含告警数据"""
-        # 重置告警存储
+        """Test full_state contains alert data"""
+        # Reset alert storage
         from alerts import AlertStore
         AlertStore._instance = None
 
         store = AlertStore(db_path=temp_db_path)
 
-        # 添加测试告警
+        # Add test alert
         alert = Alert(
             sensor="test_sensor",
             alert_type="test_alert",
@@ -217,26 +217,26 @@ class TestWebSocketWithAlerts:
         )
         store.add_alert(alert)
 
-        # 连接 WebSocket
+        # Connect WebSocket
         client = TestClient(app)
 
         with client.websocket_connect("/ws") as websocket:
             data = websocket.receive_json()
             alerts = data["data"]["alerts"]
 
-            # 验证告警数据
+            # Verify alert data
             assert isinstance(alerts, list)
 
         store.close()
 
     def test_alerts_api_sync(self, temp_db_path):
-        """测试告警 API 与 WebSocket 数据同步"""
+        """Test alert API and WebSocket data sync"""
         from alerts import AlertStore
         AlertStore._instance = None
 
         store = AlertStore(db_path=temp_db_path)
 
-        # 添加告警
+        # Add alert
         alert = Alert(
             sensor="navi_lidar",
             alert_type="frame_loss",
@@ -249,24 +249,24 @@ class TestWebSocketWithAlerts:
         )
         alert_id = store.add_alert(alert)
 
-        # 通过 WebSocket 获取告警
+        # Get alerts via WebSocket
         client = TestClient(app)
 
         with client.websocket_connect("/ws") as websocket:
             data = websocket.receive_json()
             ws_alerts = data["data"]["alerts"]
 
-            # 验证告警存在
+            # Verify alert exists
             assert any(a["id"] == alert_id for a in ws_alerts)
 
-        # 通过 API 获取告警进行验证
+        # Get alerts via API for verification
         response = client.get(f"/api/alerts/sensor/navi_lidar")
         api_data = response.json()
 
         assert api_data["success"] is True
         api_alerts = api_data["data"]
 
-        # WebSocket 和 API 应该返回相同数量的告警
+        # WebSocket and API should return the same number of alerts
         ws_navi_alerts = [a for a in ws_alerts if a["sensor"] == "navi_lidar"]
         assert len(ws_navi_alerts) == len(api_alerts)
 
@@ -274,10 +274,10 @@ class TestWebSocketWithAlerts:
 
 
 class TestWebSocketWithROS2:
-    """WebSocket 与 ROS2 系统集成测试"""
+    """WebSocket and ROS2 system integration tests"""
 
     def test_ros2_data_in_websocket(self):
-        """测试 WebSocket 包含 ROS2 数据"""
+        """Test WebSocket contains ROS2 data"""
         client = TestClient(app)
 
         with client.websocket_connect("/ws") as websocket:
@@ -285,151 +285,151 @@ class TestWebSocketWithROS2:
             ros2 = data["data"]["ros2"]
             ros2_control = data["data"]["ros2_control"]
 
-            # 验证 ROS2 数据结构
+            # Verify ROS2 data structure
             assert "status" in ros2
             assert "nodes" in ros2
             assert "topics" in ros2
 
-            # 验证 ROS2 控制数据
+            # Verify ROS2 control data
             assert "running" in ros2_control
 
     def test_ros2_api_sync(self):
-        """测试 ROS2 API 与 WebSocket 数据同步"""
+        """Test ROS2 API and WebSocket data sync"""
         client = TestClient(app)
 
-        # 通过 WebSocket 获取 ROS2 状态
+        # Get ROS2 status via WebSocket
         with client.websocket_connect("/ws") as websocket:
             ws_data = websocket.receive_json()
             ws_ros2 = ws_data["data"]["ros2"]
 
-        # 通过 API 获取状态进行验证 (使用兼容端点)
+        # Get status via API for verification (using compatible endpoint)
         response = client.get("/api/status")
         api_data = response.json()
 
-        # 验证数据一致性
+        # Verify data consistency
         assert "running" in api_data
         assert isinstance(api_data["running"], bool)
 
 
 class TestWebSocketWithRosbag:
-    """WebSocket 与 Rosbag 系统集成测试"""
+    """WebSocket and Rosbag system integration tests"""
 
     def test_rosbag_data_in_websocket(self):
-        """测试 WebSocket 包含 rosbag 数据"""
+        """Test WebSocket contains rosbag data"""
         client = TestClient(app)
 
         with client.websocket_connect("/ws") as websocket:
             data = websocket.receive_json()
             rosbag = data["data"]["rosbag"]
 
-            # 验证 rosbag 数据结构
+            # Verify rosbag data structure
             assert "recording" in rosbag
             assert isinstance(rosbag["recording"], bool)
 
 
 class TestWebSocketPerformance:
-    """WebSocket 性能测试"""
+    """WebSocket performance tests"""
 
     def test_message_latency(self):
-        """测试消息延迟"""
+        """Test message latency"""
         client = TestClient(app)
 
         with client.websocket_connect("/ws") as websocket:
-            # 记录连接时间
+            # Record connection time
             connect_time = time.time()
 
-            # 接收第一条消息
+            # Receive first message
             _ = websocket.receive_json()
             first_message_latency = time.time() - connect_time
 
-            # 第一条消息 (full_state) 应该在合理时间内到达
+            # First message (full_state) should arrive within reasonable time
             assert first_message_latency < 2.0, f"First message latency too high: {first_message_latency}s"
 
-            # 测试 ping/pong 延迟
+            # Test ping/pong latency
             ping_time = time.time()
             websocket.send_text("ping")
             _ = websocket.receive_text()
             pong_latency = time.time() - ping_time
 
-            # Ping/pong 应该很快
+            # Ping/pong should be fast
             assert pong_latency < 1.0, f"Ping/pong latency too high: {pong_latency}s"
 
     def test_connection_time(self):
-        """测试连接建立时间"""
+        """Test connection establishment time"""
         client = TestClient(app)
 
         start_time = time.time()
         with client.websocket_connect("/ws") as websocket:
             connect_time = time.time() - start_time
 
-            # 连接建立应该很快
+            # Connection should be established quickly
             assert connect_time < 1.0, f"Connection time too high: {connect_time}s"
 
-            # 接收一条消息确保连接工作
+            # Receive one message to ensure connection works
             _ = websocket.receive_json()
 
 
 class TestWebSocketErrorRecovery:
-    """WebSocket 错误恢复测试"""
+    """WebSocket error recovery tests"""
 
     def test_graceful_disconnect(self):
-        """测试优雅断开连接"""
+        """Test graceful disconnection"""
         client = TestClient(app)
 
         initial_count = manager.get_connection_count()
 
         with client.websocket_connect("/ws") as websocket:
             _ = websocket.receive_json()
-            # 连接应该在活动列表中
+            # Connection should be in active list
             current_count = manager.get_connection_count()
             assert current_count >= initial_count
 
-        # 断开后连接应该被清理
+        # Connection should be cleaned up after disconnect
         time.sleep(0.2)
         final_count = manager.get_connection_count()
         assert final_count <= initial_count
 
 
 class TestWebSocketDataIntegrity:
-    """WebSocket 数据完整性测试"""
+    """WebSocket data integrity tests"""
 
     def test_json_parseability(self):
-        """测试所有消息都是有效的 JSON"""
+        """Test all messages are valid JSON"""
         client = TestClient(app)
 
         with client.websocket_connect("/ws") as websocket:
-            # 接收多条消息
+            # Receive multiple messages
             for _ in range(3):
                 try:
                     raw = websocket.receive()
                     if raw:
-                        # 尝试解析为 JSON
+                        # Try to parse as JSON
                         data = json.loads(raw) if isinstance(raw, str) else raw
                         assert isinstance(data, dict)
                         assert "type" in data
                 except:
-                    # 可能超时
+                    # May timeout
                     break
 
     def test_timestamp_consistency(self):
-        """测试时间戳一致性"""
+        """Test timestamp consistency"""
         client = TestClient(app)
 
         with client.websocket_connect("/ws") as websocket:
-            # 接收第一条消息
+            # Receive first message
             first = websocket.receive_json()
             first_timestamp = first.get("timestamp")
 
             assert first_timestamp is not None
             assert isinstance(first_timestamp, (int, float))
 
-            # 接收第二条消息
+            # Receive second message
             try:
                 second = websocket.receive_json(timeout=7)
                 second_timestamp = second.get("timestamp")
 
                 assert second_timestamp is not None
-                # 第二条消息的时间戳应该更晚
+                # Second message timestamp should be later
                 assert second_timestamp >= first_timestamp
             except:
                 pass
@@ -437,13 +437,13 @@ class TestWebSocketDataIntegrity:
 
 @pytest.fixture
 def temp_db_path(tmp_path):
-    """临时数据库路径"""
+    """Temporary database path"""
     return str(tmp_path / "test_ws_e2e_alerts.db")
 
 
 @pytest.fixture(autouse=True)
 def reset_alert_store():
-    """每个测试后重置告警存储"""
+    """Reset alert storage after each test"""
     yield
     try:
         from alerts import AlertStore

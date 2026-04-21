@@ -148,7 +148,7 @@ class NaviLidarDiagnostic(BaseDiagnostic):
 
         topic_ok = metrics.get('topics', {}).get('points_available', False)
 
-        # 4. 从日志文件检查数据质量 (丢帧、点云数降低)
+        # 4. Check data quality from log file (frame loss, point count drop)
         log_result = self._check_lidar_log_data()
         metrics['log_data'] = log_result['metrics']
         details['log_data'] = log_result['details']
@@ -170,7 +170,7 @@ class NaviLidarDiagnostic(BaseDiagnostic):
             overall_status = StatusLevel.WARNING
             message = f"Navi LiDAR - OK, high packet loss ({packet_loss:.1f}%)"
         else:
-            # 添加统计信息到成功消息
+            # Add statistics to success message
             overall_status = StatusLevel.OK
             freq = log_result['metrics'].get('measured_frequency')
             pts = log_result['metrics'].get('avg_points')
@@ -458,24 +458,24 @@ class NaviLidarDiagnostic(BaseDiagnostic):
             return 0
 
     def _check_lidar_log_data(self) -> Dict[str, Any]:
-        """从日志文件检查 LiDAR 数据质量
+        """Check LiDAR data quality from log file
 
-        监控:
-        - 丢帧 (频率检测)
-        - 点云数降低
+        Monitors:
+        - Frame loss (frequency detection)
+        - Point count drop
         """
         from ..lidar_log_parser import LidarLogParser
 
-        # 获取阈值配置
+        # Get threshold configuration
         thresholds = self.config.get('sensors', {}).get('thresholds', {}).get('navi_lidar', {})
         min_frequency = thresholds.get('min_frequency', 8.0)
         min_points = thresholds.get('min_points_per_frame', 50000)
 
-        # 创建或获取解析器
+        # Create or get parser
         if self._log_parser is None:
             self._log_parser = LidarLogParser(max_history=100)
 
-        # 获取统计
+        # Get statistics
         stats = self._log_parser.get_statistics()
 
         metrics = {
@@ -499,7 +499,7 @@ class NaviLidarDiagnostic(BaseDiagnostic):
 
         status = StatusLevel.OK
 
-        # 检查是否有数据
+        # Check if data is available
         if stats.frame_count == 0:
             status = StatusLevel.CONNECTED
             details['issues'].append('No log data available yet')
@@ -511,16 +511,16 @@ class NaviLidarDiagnostic(BaseDiagnostic):
 
         current_time = time.time()
 
-        # 检查频率 (丢帧检测)
+        # Check frequency (frame loss detection)
         if stats.frequency > 0:
-            if stats.frequency < min_frequency * 0.5:  # 低于 50%
+            if stats.frequency < min_frequency * 0.5:  # Below 50%
                 status = StatusLevel.CRITICAL
                 details['issues'].append(
                     f'Severe frame loss: {stats.frequency:.1f} Hz (expected >= {min_frequency} Hz)'
                 )
                 logger.error(f"Navi LiDAR: Severe frame loss - {stats.frequency:.1f} Hz < {min_frequency} Hz")
 
-                # 记录告警 (带冷却时间避免重复)
+                # Record alert (with cooldown to avoid duplicates)
                 if current_time - self._last_alert_time.get('frame_loss_critical', 0) > self._alert_cooldown:
                     self._record_alert(
                         alert_type='frame_loss_critical',
@@ -536,14 +536,14 @@ class NaviLidarDiagnostic(BaseDiagnostic):
                     )
                     self._last_alert_time['frame_loss_critical'] = current_time
 
-            elif stats.frequency < min_frequency:  # 低于阈值
+            elif stats.frequency < min_frequency:  # Below threshold
                 status = StatusLevel.WARNING
                 details['issues'].append(
                     f'Frame loss detected: {stats.frequency:.1f} Hz (expected >= {min_frequency} Hz)'
                 )
                 logger.warning(f"Navi LiDAR: Frame loss - {stats.frequency:.1f} Hz < {min_frequency} Hz")
 
-                # 记录告警
+                # Record alert
                 if current_time - self._last_alert_time.get('frame_loss', 0) > self._alert_cooldown:
                     self._record_alert(
                         alert_type='frame_loss',
@@ -559,16 +559,16 @@ class NaviLidarDiagnostic(BaseDiagnostic):
                     )
                     self._last_alert_time['frame_loss'] = current_time
 
-        # 检查点数 (点云数降低检测)
+        # Check point count (point count drop detection)
         avg_points = stats.avg_points
-        if avg_points < min_points * 0.5:  # 低于 50%
+        if avg_points < min_points * 0.5:  # Below 50%
             status = get_higher_priority_status(status, StatusLevel.CRITICAL)
             details['issues'].append(
                 f'Point count very low: {avg_points:.0f} (expected >= {min_points})'
             )
             logger.error(f"Navi LiDAR: Very low point count - {avg_points:.0f} < {min_points}")
 
-            # 记录告警
+            # Record alert
             if current_time - self._last_alert_time.get('point_count_critical', 0) > self._alert_cooldown:
                 self._record_alert(
                     alert_type='point_count_critical',
@@ -585,14 +585,14 @@ class NaviLidarDiagnostic(BaseDiagnostic):
                 )
                 self._last_alert_time['point_count_critical'] = current_time
 
-        elif avg_points < min_points:  # 低于阈值
+        elif avg_points < min_points:  # Below threshold
             status = get_higher_priority_status(status, StatusLevel.WARNING)
             details['issues'].append(
                 f'Point count reduced: {avg_points:.0f} (expected >= {min_points})'
             )
             logger.warning(f"Navi LiDAR: Point count reduced - {avg_points:.0f} < {min_points}")
 
-            # 记录告警
+            # Record alert
             if current_time - self._last_alert_time.get('point_count', 0) > self._alert_cooldown:
                 self._record_alert(
                     alert_type='point_count_low',
@@ -609,7 +609,7 @@ class NaviLidarDiagnostic(BaseDiagnostic):
                 )
                 self._last_alert_time['point_count'] = current_time
 
-        # 检查数据是否过期
+        # Check if data is stale
         if stats.time_since_last_frame > 2.0:
             status = get_higher_priority_status(status, StatusLevel.WARNING)
             details['issues'].append(f'No new frames for {stats.time_since_last_frame:.1f}s')
@@ -623,15 +623,15 @@ class NaviLidarDiagnostic(BaseDiagnostic):
 
     def _record_alert(self, alert_type: str, severity: str, message: str,
                       metric_value: float, threshold: float, metadata: dict):
-        """记录告警到数据库
+        """Record alert to database
 
         Args:
-            alert_type: 告警类型
-            severity: 严重程度 (critical, warning)
-            message: 告警消息
-            metric_value: 触发值
-            threshold: 阈值
-            metadata: 额外元数据
+            alert_type: Alert type
+            severity: Severity level (critical, warning)
+            message: Alert message
+            metric_value: Triggering value
+            threshold: Threshold value
+            metadata: Additional metadata
         """
         try:
             from alerts import get_alert_store, Alert

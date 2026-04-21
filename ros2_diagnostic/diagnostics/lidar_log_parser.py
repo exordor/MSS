@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Navi LiDAR Log Parser
-从日志文件中解析点云统计数据
+Parse point cloud statistics from log files
 """
 
 import re
@@ -12,8 +12,8 @@ from typing import Optional
 from dataclasses import dataclass
 from pathlib import Path
 
-# 日志行正则表达式
-# 匹配格式: [hesai_ros_driver_node-1] raw frame:49 points:115200 packet:450 start time:1602248443.495515 end time:1602248443.595332
+# Log line regex
+# Match format: [hesai_ros_driver_node-1] raw frame:49 points:115200 packet:450 start time:1602248443.495515 end time:1602248443.595332
 LOG_PATTERN = re.compile(
     r'\[hesai_ros_driver_node-\d+\] '
     r'raw frame:(\d+) '
@@ -26,7 +26,7 @@ LOG_PATTERN = re.compile(
 
 @dataclass
 class FrameData:
-    """单帧数据"""
+    """Single frame data"""
     frame_num: int
     points: int
     packets: int
@@ -36,7 +36,7 @@ class FrameData:
 
 @dataclass
 class LidarStats:
-    """LiDAR 统计数据"""
+    """LiDAR statistics"""
     frame_count: int
     total_points: int
     avg_points: float
@@ -49,12 +49,12 @@ class LidarStats:
 
 
 class LidarLogParser:
-    """从日志文件解析 LiDAR 数据
+    """Parse LiDAR data from log files
 
-    线程安全的日志解析器，用于从 navi_lidar 日志中提取：
-    - 点云数量
-    - 帧率 (通过时间戳计算)
-    - 包数量
+    Thread-safe log parser for extracting from navi_lidar logs:
+    - Point cloud count
+    - Frame rate (calculated from timestamps)
+    - Packet count
     """
 
     def __init__(self,
@@ -63,36 +63,36 @@ class LidarLogParser:
         self.log_file = log_file
         self.max_history = max_history
 
-        # 解析缓存
+        # Parse cache
         self._frames: deque = deque(maxlen=max_history)
-        self._last_pos = 0  # 上次读取位置
+        self._last_pos = 0  # Last read position
         self._lock = threading.Lock()
 
-        # 统计缓存
+        # Stats cache
         self._cached_stats: Optional[LidarStats] = None
         self._cache_time: float = 0
-        self._cache_ttl: float = 0.5  # 缓存 0.5 秒
+        self._cache_ttl: float = 0.5  # Cache for 0.5 seconds
 
     def _find_log_file(self) -> Optional[str]:
-        """查找 navi_lidar 日志文件
+        """Find navi_lidar log file
 
-        优先级：
-        1. navi_lidar_driver.log (由 logging.sh 提取)
-        2. 00_master.log (原始主日志)
+        Priority:
+        1. navi_lidar_driver.log (extracted by logging.sh)
+        2. 00_master.log (raw master log)
 
-        日志目录结构: logs/YYYYMMDD_HHMMSS/app/00_master.log
+        Log directory structure: logs/YYYYMMDD_HHMMSS/app/00_master.log
         """
         logs_dir = Path("logs")
         if not logs_dir.exists():
             return None
 
-        # 查找最新的 navi_lidar_driver.log (可能在 app 子目录)
+        # Find latest navi_lidar_driver.log (may be in app subdirectory)
         driver_logs = list(logs_dir.glob("*/app/navi_lidar_driver.log"))
         driver_logs.extend(list(logs_dir.glob("*/navi_lidar_driver.log")))
         if driver_logs:
             return str(max(driver_logs, key=lambda p: p.stat().st_mtime))
 
-        # 回退到 00_master.log (可能在 app 子目录)
+        # Fall back to 00_master.log (may be in app subdirectory)
         master_logs = list(logs_dir.glob("*/app/00_master.log"))
         master_logs.extend(list(logs_dir.glob("*/00_master.log")))
         if master_logs:
@@ -101,14 +101,14 @@ class LidarLogParser:
         return None
 
     def _read_new_lines(self) -> list:
-        """读取日志文件中的新增行"""
+        """Read new lines from log file"""
         log_path = self.log_file or self._find_log_file()
         if not log_path:
             return []
 
         try:
             with open(log_path, 'r') as f:
-                # 从上次位置继续读取
+                # Continue reading from last position
                 f.seek(self._last_pos)
                 new_lines = f.readlines()
                 self._last_pos = f.tell()
@@ -117,7 +117,7 @@ class LidarLogParser:
             return []
 
     def parse_new_frames(self) -> int:
-        """解析新增的帧数据，返回新增帧数"""
+        """Parse new frame data, returns number of new frames"""
         new_lines = self._read_new_lines()
         new_frames = []
 
@@ -135,19 +135,19 @@ class LidarLogParser:
 
         with self._lock:
             self._frames.extend(new_frames)
-            # 清除缓存，因为数据更新了
+            # Invalidate cache since data has been updated
             self._cached_stats = None
 
         return len(new_frames)
 
     def get_statistics(self) -> LidarStats:
-        """获取统计数据（带缓存）"""
-        # 先解析新数据
+        """Get statistics (with caching)"""
+        # Parse new data first
         self.parse_new_frames()
 
         current_time = datetime.now().timestamp()
 
-        # 检查缓存
+        # Check cache
         if self._cached_stats and (current_time - self._cache_time) < self._cache_ttl:
             return self._cached_stats
 
@@ -167,15 +167,15 @@ class LidarLogParser:
                 time_since_last_frame=float('inf')
             )
 
-        # 基本统计
+        # Basic statistics
         points = [f.points for f in frames]
         frame_count = len(frames)
 
-        # 计算频率 (基于最近 5 秒的数据)
-        # 注意：日志时间戳可能使用设备时间而非系统时间
-        # 因此使用日志时间戳之间的相对差值来计算频率
+        # Calculate frequency (based on last 5 seconds of data)
+        # Note: Log timestamps may use device time rather than system time
+        # so use relative difference between log timestamps for frequency
         if len(frames) >= 2:
-            # 使用最近 100 帧或所有帧计算频率
+            # Use last 100 frames or all frames for frequency
             calc_frames = frames[-min(100, len(frames)):]
             duration = calc_frames[-1].start_time - calc_frames[0].start_time
             if duration > 0:
@@ -183,12 +183,12 @@ class LidarLogParser:
         else:
             frequency = 0
 
-        # 最后帧的时间差
-        # 由于日志时间戳可能使用设备时间而非系统时间，
-        # 使用当前时间与最后解析时间的差值作为近似
+        # Time difference for last frame
+        # Since log timestamps may use device time rather than system time,
+        # use the difference between current time and last parse time as approximation
         time_since_last = current_time - self._cache_time if self._cache_time > 0 else 0
 
-        # 获取最后一帧信息
+        # Get last frame info
         last_frame = frames[-1]
 
         stats = LidarStats(
@@ -203,14 +203,14 @@ class LidarLogParser:
             time_since_last_frame=time_since_last
         )
 
-        # 更新缓存
+        # Update cache
         self._cached_stats = stats
         self._cache_time = current_time
 
         return stats
 
     def reset(self):
-        """重置统计数据"""
+        """Reset statistics"""
         with self._lock:
             self._frames.clear()
             self._cached_stats = None

@@ -31,8 +31,8 @@ class IMUDiagnostic(BaseDiagnostic):
         self.serial_port = self._detect_serial_port()
 
         # One-time data verification flags
-        self._data_verified = False      # 数据验证结果
-        self._data_check_done = False    # 是否已完成验证
+        self._data_verified = False      # Data verification result
+        self._data_check_done = False    # Whether verification has been completed
 
         self._ros2_monitor = None
 
@@ -331,12 +331,12 @@ class IMUDiagnostic(BaseDiagnostic):
             }
 
     def _verify_data_once(self) -> bool:
-        """一次性验证：检查 /imu/data 是否有实际数据发布
+        """One-time verification: check if /imu/data has actual data being published
 
         Returns:
-            bool: 是否收到数据
+            bool: Whether data was received
         """
-        # 如果已经验证过，直接返回缓存结果
+        # If already verified, return cached result
         if self._data_check_done:
             return self._data_verified
 
@@ -351,7 +351,7 @@ class IMUDiagnostic(BaseDiagnostic):
 
             helper = get_ros2_helper(42)
 
-            # 创建临时订阅器接收数据
+            # Create temporary subscriber to receive data
             received = {'count': 0}
             def msg_callback(msg):
                 received['count'] += 1
@@ -365,7 +365,7 @@ class IMUDiagnostic(BaseDiagnostic):
                 Imu, self.data_topic, msg_callback, qos
             )
 
-            # 等待消息（最多 3 秒）
+            # Wait for messages (up to 3 seconds)
             import time
             deadline = time.time() + 3.0
             while time.time() < deadline and received['count'] == 0:
@@ -374,7 +374,7 @@ class IMUDiagnostic(BaseDiagnostic):
                 except Exception:
                     break
 
-            # 清理订阅器
+            # Clean up subscriber
             sub.destroy()
 
             self._data_verified = received['count'] > 0

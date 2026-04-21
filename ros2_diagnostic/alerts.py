@@ -17,20 +17,20 @@ from pathlib import Path
 
 @dataclass
 class Alert:
-    """告警数据模型
+    """Alert data model
 
     Attributes:
-        id: 数据库自增 ID
-        sensor: 传感器名称 (navi_lidar, camera, imu, thruster)
-        alert_type: 告警类型 (frame_loss, point_count_low, connectivity, etc.)
-        severity: 严重程度 (critical, warning)
-        message: 告警消息
-        metric_value: 触发告警的测量值
-        threshold: 阈值
-        metadata: JSON 格式的额外元数据
-        created_at: 创建时间 (ISO 8601)
-        resolved_at: 解决时间 (ISO 8601), 可选
-        status: 状态 (active, resolved, ignored)
+        id: Database auto-increment ID
+        sensor: Sensor name (navi_lidar, camera, imu, thruster)
+        alert_type: Alert type (frame_loss, point_count_low, connectivity, etc.)
+        severity: Severity level (critical, warning)
+        message: Alert message
+        metric_value: Measured value that triggered the alert
+        threshold: Threshold value
+        metadata: Additional metadata in JSON format
+        created_at: Creation time (ISO 8601)
+        resolved_at: Resolution time (ISO 8601), optional
+        status: Status (active, resolved, ignored)
     """
     id: Optional[int] = None
     sensor: str = ""
@@ -39,16 +39,16 @@ class Alert:
     message: str = ""
     metric_value: float = 0.0
     threshold: float = 0.0
-    metadata: str = ""  # JSON 格式
+    metadata: str = ""  # JSON format
     created_at: str = ""
     resolved_at: Optional[str] = None
     status: str = "active"  # active, resolved, ignored
 
 
 class AlertStore:
-    """告警存储 - 单例模式，线程安全
+    """Alert storage - singleton pattern, thread-safe
 
-    提供告警的持久化存储、查询和管理功能。
+    Provides persistent storage, querying, and management for alerts.
     """
 
     _instance = None
@@ -63,7 +63,7 @@ class AlertStore:
 
     def __init__(self, db_path: str = None):
         if not hasattr(self, '_initialized'):
-            # 默认路径在 ros2_diagnostic 目录下
+            # Default path is in the ros2_diagnostic directory
             if db_path is None:
                 db_path = Path(__file__).parent / 'alerts.db'
             else:
@@ -71,12 +71,12 @@ class AlertStore:
 
             self.db_path = str(db_path)
             self._conn: Optional[sqlite3.Connection] = None
-            self._alert_callback = None  # 告警回调函数（用于实时推送）
+            self._alert_callback = None  # Alert callback function (for real-time push)
             self._init_db()
             self._initialized = True
 
     def _init_db(self):
-        """初始化数据库连接和表"""
+        """Initialize database connection and tables"""
         try:
             self._conn = sqlite3.connect(
                 self.db_path,
@@ -90,7 +90,7 @@ class AlertStore:
             raise
 
     def _create_tables(self):
-        """创建告警表和索引"""
+        """Create alerts table and indexes"""
         self._conn.execute('''
             CREATE TABLE IF NOT EXISTS alerts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -107,7 +107,7 @@ class AlertStore:
             )
         ''')
 
-        # 创建索引以提高查询性能
+        # Create indexes to improve query performance
         self._conn.execute('CREATE INDEX IF NOT EXISTS idx_sensor ON alerts(sensor)')
         self._conn.execute('CREATE INDEX IF NOT EXISTS idx_status ON alerts(status)')
         self._conn.execute('CREATE INDEX IF NOT EXISTS idx_created ON alerts(created_at DESC)')
@@ -117,43 +117,43 @@ class AlertStore:
         self._conn.commit()
 
     def set_alert_callback(self, callback):
-        """设置告警回调函数（用于实时推送）
+        """Set alert callback function (for real-time push)
 
         Args:
-            callback: 异步回调函数，接收 Alert 对象作为参数
+            callback: Async callback function, receives Alert object as argument
         """
         self._alert_callback = callback
 
     async def _trigger_alert_callback(self, alert: Alert):
-        """触发告警回调（异步执行）
+        """Trigger alert callback (async execution)
 
         Args:
-            alert: Alert 对象
+            alert: Alert object
         """
         if self._alert_callback:
             try:
-                # 尝试作为协程调用
+                # Try calling as coroutine
                 if asyncio.iscoroutinefunction(self._alert_callback):
                     await self._alert_callback(alert)
                 else:
-                    # 普通函数，在 asyncio 事件循环中调度
+                    # Plain function, schedule in asyncio event loop
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
                         asyncio.create_task(self._alert_callback(alert))
                     else:
-                        # 如果事件循环未运行，直接调用
+                        # If event loop is not running, call directly
                         self._alert_callback(alert)
             except Exception as e:
                 print(f"Error in alert callback: {e}")
 
     def add_alert(self, alert: Alert) -> int:
-        """添加新告警
+        """Add a new alert
 
         Args:
-            alert: Alert 对象
+            alert: Alert object
 
         Returns:
-            新告警的 ID
+            ID of the new alert
         """
         cursor = self._conn.execute('''
             INSERT INTO alerts (sensor, alert_type, severity, message,
@@ -166,16 +166,16 @@ class AlertStore:
         self._conn.commit()
         alert_id = cursor.lastrowid
 
-        # 触发实时推送回调（异步执行，不阻塞 add_alert）
+        # Trigger real-time push callback (async execution, non-blocking for add_alert)
         if self._alert_callback:
             try:
-                # 尝试获取运行中的事件循环
+                # Try to get the running event loop
                 try:
                     loop = asyncio.get_running_loop()
-                    # 在运行中的事件循环中调度任务
+                    # Schedule task in the running event loop
                     loop.create_task(self._alert_callback(alert))
                 except RuntimeError:
-                    # 没有运行中的事件循环，尝试使用 run_in_executor
+                    # No running event loop, try using run_in_executor
                     import threading
                     def run_callback():
                         try:
@@ -196,13 +196,13 @@ class AlertStore:
         return alert_id
 
     def get_active_alerts(self, sensor: str = None) -> List[Alert]:
-        """获取活动告警
+        """Get active alerts
 
         Args:
-            sensor: 可选，按传感器过滤
+            sensor: Optional, filter by sensor
 
         Returns:
-            Alert 对象列表
+            List of Alert objects
         """
         if sensor:
             cursor = self._conn.execute('''
@@ -220,15 +220,15 @@ class AlertStore:
 
     def get_recent_alerts(self, limit: int = 100, offset: int = 0,
                          include_resolved: bool = False) -> List[Alert]:
-        """获取最近的告警（包括可选的已解决告警）
+        """Get recent alerts (optionally including resolved alerts)
 
         Args:
-            limit: 返回数量限制
-            offset: 偏移量
-            include_resolved: 是否包含已解决的告警
+            limit: Maximum number of results
+            offset: Offset for pagination
+            include_resolved: Whether to include resolved alerts
 
         Returns:
-            Alert 对象列表
+            List of Alert objects
         """
         if include_resolved:
             cursor = self._conn.execute('''
@@ -244,13 +244,13 @@ class AlertStore:
         return [Alert(**dict(row)) for row in rows]
 
     def resolve_alert(self, alert_id: int) -> bool:
-        """解决告警
+        """Resolve an alert
 
         Args:
-            alert_id: 告警 ID
+            alert_id: Alert ID
 
         Returns:
-            是否成功解决
+            Whether the alert was successfully resolved
         """
         cursor = self._conn.execute('''
             UPDATE alerts SET status = 'resolved', resolved_at = ?
@@ -273,13 +273,13 @@ class AlertStore:
         return cursor.rowcount
 
     def ignore_alert(self, alert_id: int) -> bool:
-        """忽略告警（不再显示，但保留记录）
+        """Ignore an alert (no longer displayed, but record is kept)
 
         Args:
-            alert_id: 告警 ID
+            alert_id: Alert ID
 
         Returns:
-            是否成功忽略
+            Whether the alert was successfully ignored
         """
         cursor = self._conn.execute('''
             UPDATE alerts SET status = 'ignored'
@@ -302,10 +302,10 @@ class AlertStore:
         return cursor.rowcount
 
     def get_alert_stats(self) -> Dict[str, Any]:
-        """获取告警统计
+        """Get alert statistics
 
         Returns:
-            包含总告警数、活动告警数、严重程度统计的字典
+            Dictionary with total alerts, active alerts, and severity breakdown
         """
         cursor = self._conn.execute('''
             SELECT
@@ -321,14 +321,14 @@ class AlertStore:
         return dict(row) if row else {}
 
     def get_alerts_by_sensor(self, sensor: str, limit: int = 50) -> List[Alert]:
-        """按传感器获取告警
+        """Get alerts by sensor
 
         Args:
-            sensor: 传感器名称
-            limit: 返回数量限制
+            sensor: Sensor name
+            limit: Maximum number of results
 
         Returns:
-            Alert 对象列表
+            List of Alert objects
         """
         cursor = self._conn.execute('''
             SELECT * FROM alerts
@@ -341,14 +341,14 @@ class AlertStore:
         return [Alert(**dict(row)) for row in rows]
 
     def get_alerts_by_severity(self, severity: str, limit: int = 50) -> List[Alert]:
-        """按严重程度获取告警
+        """Get alerts by severity
 
         Args:
-            severity: 严重程度 (critical, warning)
-            limit: 返回数量限制
+            severity: Severity level (critical, warning)
+            limit: Maximum number of results
 
         Returns:
-            Alert 对象列表
+            List of Alert objects
         """
         cursor = self._conn.execute('''
             SELECT * FROM alerts
@@ -361,16 +361,16 @@ class AlertStore:
         return [Alert(**dict(row)) for row in rows]
 
     def cleanup_old_alerts(self, days: int = 30) -> int:
-        """清理旧告警（可选功能，按需求使用）
+        """Clean up old alerts (optional, use as needed)
 
-        注意：根据用户需求，默认保留所有告警。此方法仅用于
-        手动清理非常旧的告警。
+        Note: By default, all alerts are retained. This method is only for
+        manual cleanup of very old alerts.
 
         Args:
-            days: 保留最近多少天的告警
+            days: Number of recent days to keep
 
         Returns:
-            删除的告警数量
+            Number of deleted alerts
         """
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
 
@@ -385,24 +385,24 @@ class AlertStore:
         return cursor.rowcount
 
     def close(self):
-        """关闭数据库连接"""
+        """Close database connection"""
         if self._conn:
             self._conn.close()
 
 
-# 全局实例
+# Global instance
 _alert_store_instance: Optional[AlertStore] = None
 _store_lock = threading.Lock()
 
 
 def get_alert_store(db_path: str = None) -> AlertStore:
-    """获取 AlertStore 单例实例
+    """Get AlertStore singleton instance
 
     Args:
-        db_path: 可选，自定义数据库路径
+        db_path: Optional, custom database path
 
     Returns:
-        AlertStore 实例
+        AlertStore instance
     """
     global _alert_store_instance
 
@@ -414,7 +414,7 @@ def get_alert_store(db_path: str = None) -> AlertStore:
 
 
 def close_alert_store():
-    """关闭告警存储（用于应用关闭时清理）"""
+    """Close alert storage (for cleanup during app shutdown)"""
     global _alert_store_instance
 
     with _store_lock:

@@ -140,7 +140,7 @@ class CameraDiagnostic(BaseDiagnostic):
 
         topic_ok = topic_result['metrics'].get('image_available', False)
 
-        # 4. 从日志文件检查数据质量 (丢帧、延迟、网络问题)
+        # 4. Check data quality from log file (frame loss, latency, network issues)
         log_result = self._check_camera_log_data()
         metrics['log_data'] = log_result['metrics']
         details['log_data'] = log_result['details']
@@ -160,7 +160,7 @@ class CameraDiagnostic(BaseDiagnostic):
             message = f"Camera - WARNING: {issues[0] if issues else 'data quality issue'} ({latency:.0f}ms latency)"
         else:
             overall_status = StatusLevel.OK
-            # 添加统计信息到成功消息
+            # Add statistics to success message
             freq = log_result['metrics'].get('measured_frequency')
             if freq:
                 message = f"Camera - OK ({freq:.1f} Hz, {latency:.0f}ms latency)"
@@ -375,27 +375,27 @@ class CameraDiagnostic(BaseDiagnostic):
             return 0
 
     def _check_camera_log_data(self) -> Dict[str, Any]:
-        """从日志文件检查 Camera 数据质量
+        """Check Camera data quality from log file
 
-        监控:
-        - 丢帧 (SDKIncomplete + Queue drops)
-        - 帧率异常
-        - 网络丢包
-        - 处理延迟过高
+        Monitors:
+        - Frame loss (SDKIncomplete + Queue drops)
+        - Frame rate anomaly
+        - Network packet loss
+        - Excessive processing latency
         """
         from ..camera_log_parser import CameraLogParser
 
-        # 获取阈值配置
+        # Get threshold configuration
         thresholds = self.config.get('sensors', {}).get('thresholds', {}).get('camera', {})
         min_frequency = thresholds.get('min_frequency', 1.5)
         max_frequency = thresholds.get('max_frequency', 2.5)
         max_latency = thresholds.get('max_latency', 500)
 
-        # 创建或获取解析器
+        # Create or get parser
         if self._log_parser is None:
             self._log_parser = CameraLogParser(max_history=30)
 
-        # 获取统计
+        # Get statistics
         stats = self._log_parser.get_statistics()
 
         metrics = {
@@ -423,7 +423,7 @@ class CameraDiagnostic(BaseDiagnostic):
         status = StatusLevel.OK
         current_time = time.time()
 
-        # 检查是否有数据
+        # Check if data is available
         if stats.frame_count == 0:
             status = StatusLevel.CONNECTED
             details['issues'].append('No log data available yet')
@@ -433,9 +433,9 @@ class CameraDiagnostic(BaseDiagnostic):
                 'details': details
             }
 
-        # 检查频率 (帧率异常检测)
+        # Check frequency (frame rate anomaly detection)
         if stats.frequency > 0:
-            if stats.frequency < min_frequency * 0.5:  # 低于 50%
+            if stats.frequency < min_frequency * 0.5:  # Below 50%
                 status = StatusLevel.CRITICAL
                 details['issues'].append(
                     f'Severe frame loss: {stats.frequency:.1f} Hz (expected >= {min_frequency} Hz)'
@@ -457,7 +457,7 @@ class CameraDiagnostic(BaseDiagnostic):
                     )
                     self._last_alert_time['frame_loss_critical'] = current_time
 
-            elif stats.frequency < min_frequency:  # 低于阈值
+            elif stats.frequency < min_frequency:  # Below threshold
                 status = StatusLevel.WARNING
                 details['issues'].append(
                     f'Frame loss detected: {stats.frequency:.1f} Hz (expected >= {min_frequency} Hz)'
@@ -479,16 +479,16 @@ class CameraDiagnostic(BaseDiagnostic):
                     )
                     self._last_alert_time['frame_loss'] = current_time
 
-            elif stats.frequency > max_frequency * 1.5:  # 高于 150%
+            elif stats.frequency > max_frequency * 1.5:  # Above 150%
                 status = get_higher_priority_status(status, StatusLevel.WARNING)
                 details['issues'].append(
                     f'Frame rate too high: {stats.frequency:.1f} Hz (expected <= {max_frequency} Hz)'
                 )
                 logger.warning(f"Camera: Frame rate too high - {stats.frequency:.1f} Hz > {max_frequency} Hz")
 
-        # 检查队列溢出 (处理队列满导致的丢帧)
+        # Check queue overflow (frame drops due to full processing queue)
         if stats.queue_dropped > 0:
-            if stats.queue_dropped > stats.frame_count * 0.05:  # 超过 5% 触发严重告警
+            if stats.queue_dropped > stats.frame_count * 0.05:  # Over 5% triggers critical alert
                 status = get_higher_priority_status(status, StatusLevel.CRITICAL)
                 details['issues'].append(
                     f'Queue overflow: {stats.queue_dropped} frames dropped due to full processing queue'
@@ -510,7 +510,7 @@ class CameraDiagnostic(BaseDiagnostic):
                     )
                     self._last_alert_time['queue_overflow'] = current_time
             elif current_time - self._last_alert_time.get('queue_overflow_warning', 0) > self._alert_cooldown:
-                # 队列溢出即使少量也值得警告
+                # Even small queue overflow is worth warning about
                 status = get_higher_priority_status(status, StatusLevel.WARNING)
                 details['issues'].append(
                     f'Queue dropping frames: {stats.queue_dropped} frames dropped'
@@ -530,9 +530,9 @@ class CameraDiagnostic(BaseDiagnostic):
                 )
                 self._last_alert_time['queue_overflow_warning'] = current_time
 
-        # 检查网络丢帧 (SDKIncomplete)
+        # Check network frame loss (SDKIncomplete)
         incomplete_dropped = stats.incomplete_count
-        if incomplete_dropped > stats.frame_count * 0.1:  # 超过 10%
+        if incomplete_dropped > stats.frame_count * 0.1:  # Over 10%
             status = get_higher_priority_status(status, StatusLevel.CRITICAL)
             details['issues'].append(
                 f'High frame loss (network): {incomplete_dropped}/{stats.frame_count} frames incomplete'
@@ -554,17 +554,17 @@ class CameraDiagnostic(BaseDiagnostic):
                 )
                 self._last_alert_time['high_frame_loss'] = current_time
 
-        # 总体丢帧统计 (包括队列和网络丢帧)
+        # Overall frame loss statistics (including queue and network drops)
         total_dropped = stats.incomplete_count + stats.queue_dropped
         if total_dropped > 0 and stats.queue_dropped == 0:
-            # 只有网络丢帧时才显示这个警告 (避免与 queue_overflow 重复)
+            # Only show this warning for network-only drops (avoid duplicate with queue_overflow)
             status = get_higher_priority_status(status, StatusLevel.WARNING)
             details['issues'].append(
                 f'Frame loss detected: {total_dropped}/{stats.frame_count} frames dropped'
             )
             logger.warning(f"Camera: Frame loss - {total_dropped}/{stats.frame_count}")
 
-        # 检查网络丢包
+        # Check network packet loss
         if stats.rx_errors > 10 or stats.rx_dropped > 10:
             status = get_higher_priority_status(status, StatusLevel.CRITICAL)
             details['issues'].append(
@@ -572,7 +572,7 @@ class CameraDiagnostic(BaseDiagnostic):
             )
             logger.error(f"Camera: Network issues - rx_errors={stats.rx_errors}, rx_dropped={stats.rx_dropped}")
 
-        # 检查处理延迟
+        # Check processing latency
         if stats.avg_processing_ms > max_latency:
             status = get_higher_priority_status(status, StatusLevel.WARNING)
             details['issues'].append(
@@ -580,7 +580,7 @@ class CameraDiagnostic(BaseDiagnostic):
             )
             logger.warning(f"Camera: High processing latency - {stats.avg_processing_ms:.1f} ms")
 
-        # 检查数据是否过期
+        # Check if data is stale
         if stats.time_since_last_report > 5.0:
             status = get_higher_priority_status(status, StatusLevel.WARNING)
             details['issues'].append(f'No new reports for {stats.time_since_last_report:.1f}s')
@@ -594,15 +594,15 @@ class CameraDiagnostic(BaseDiagnostic):
 
     def _record_alert(self, alert_type: str, severity: str, message: str,
                       metric_value: float, threshold: float, metadata: dict):
-        """记录告警到数据库
+        """Record alert to database
 
         Args:
-            alert_type: 告警类型
-            severity: 严重程度 (critical, warning)
-            message: 告警消息
-            metric_value: 触发值
-            threshold: 阈值
-            metadata: 额外元数据
+            alert_type: Alert type
+            severity: Severity level (critical, warning)
+            message: Alert message
+            metric_value: Triggering value
+            threshold: Threshold value
+            metadata: Additional metadata
         """
         try:
             import json

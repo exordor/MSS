@@ -49,10 +49,10 @@ class MqttClient:
             return False
 
         with MqttClient._lock:
-            if self._connected and self._broker_host == broker_host:
+            if self._connected:
                 return True
 
-            if self._client is not None and not self._connected:
+            if self._client is not None:
                 return True
 
             self._broker_host = broker_host
@@ -86,10 +86,14 @@ class MqttClient:
     def subscribe(self, topic: str, callback: Callable[[str, Any], None]):
         self._callbacks.setdefault(topic, []).append(callback)
 
-        if self._connected and topic not in self._subscribed_topics:
-            self._client.subscribe(topic, qos=0)
-            self._subscribed_topics.add(topic)
-            logger.debug(f"MQTT subscribed: {topic}")
+        with MqttClient._lock:
+            if self._connected and topic not in self._subscribed_topics:
+                self._client.subscribe(topic, qos=0)
+                self._subscribed_topics.add(topic)
+                logger.info(f"MQTT subscribed: {topic}")
+            elif not self._connected:
+                self._subscribed_topics.add(topic)
+                logger.info(f"MQTT subscription queued: {topic}")
 
     def publish(self, topic: str, payload: str, qos: int = 0, retain: bool = False) -> bool:
         if not self._connected or not self._client:
@@ -106,15 +110,14 @@ class MqttClient:
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
-            self._connected = True
-            logger.info(f"MQTT connected to {self._broker_host}:{self._broker_port}")
-            for topic in self._subscribed_topics:
-                client.subscribe(topic, qos=0)
-                logger.debug(f"MQTT re-subscribed: {topic}")
-            for topic in list(self._callbacks.keys()):
-                if topic not in self._subscribed_topics:
+            with MqttClient._lock:
+                self._connected = True
+                logger.info(f"MQTT connected to {self._broker_host}:{self._broker_port}")
+                all_topics = set(self._subscribed_topics) | set(self._callbacks.keys())
+                for topic in all_topics:
                     client.subscribe(topic, qos=0)
                     self._subscribed_topics.add(topic)
+                    logger.info(f"MQTT subscribed on connect: {topic}")
         else:
             logger.error(f"MQTT connect failed with code {rc}")
 

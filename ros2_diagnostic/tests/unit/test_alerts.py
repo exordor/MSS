@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-AlertStore 单元测试
+AlertStore unit tests
 
-测试 Alert 类和 AlertStore 类的核心功能:
-- 数据类创建和验证
-- 单例模式
-- CRUD 操作
-- 线程安全
+Test core functionality of Alert and AlertStore classes:
+- Data class creation and validation
+- Singleton pattern
+- CRUD operations
+- Thread safety
 """
 
 import pytest
@@ -16,7 +16,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-# 确保 alerts 模块可以被导入
+# Ensure the alerts module can be imported
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -24,10 +24,10 @@ from alerts import Alert, AlertStore, get_alert_store
 
 
 class TestAlert:
-    """Alert 数据类测试"""
+    """Alert data class tests"""
 
     def test_alert_creation_full(self):
-        """测试 Alert 对象完整创建"""
+        """Test Alert object creation with all fields"""
         alert = Alert(
             id=1,
             sensor="navi_lidar",
@@ -51,7 +51,7 @@ class TestAlert:
         assert alert.id == 1
 
     def test_alert_with_defaults(self):
-        """测试带默认值的 Alert"""
+        """Test Alert with default values"""
         alert = Alert(sensor="test")
         assert alert.sensor == "test"
         assert alert.severity == ""
@@ -65,7 +65,7 @@ class TestAlert:
         assert alert.resolved_at is None
 
     def test_alert_metadata_json(self):
-        """测试 metadata JSON 序列化"""
+        """Test metadata JSON serialization"""
         import json
         metadata = {"measured_frequency": 6.2, "frame_count": 50}
         alert = Alert(
@@ -78,30 +78,30 @@ class TestAlert:
             metadata=json.dumps(metadata),
             created_at="2026-01-27T10:00:00"
         )
-        # 验证可以解析回 JSON
+        # Verify it can be parsed back to JSON
         parsed = json.loads(alert.metadata)
         assert parsed == metadata
 
 
 class TestAlertStore:
-    """AlertStore 类测试"""
+    """AlertStore class tests"""
 
     def test_singleton_pattern(self, temp_db_path):
-        """测试单例模式"""
+        """Test singleton pattern"""
         store1 = AlertStore(db_path=temp_db_path)
         store2 = AlertStore(db_path=temp_db_path)
         assert store1 is store2
 
-        # 验证使用相同数据库
+        # Verify they use the same database
         assert store1.db_path == store2.db_path
 
     def test_database_creation(self, temp_db_path):
-        """测试数据库表创建"""
-        # 重置单例
+        """Test database table creation"""
+        # Reset singleton
         AlertStore._instance = None
         store = AlertStore(db_path=temp_db_path)
 
-        # 添加一条数据以确保数据库文件被创建
+        # Add a record to ensure the database file is created
         from alerts import Alert
         store.add_alert(Alert(
             sensor="test",
@@ -114,18 +114,18 @@ class TestAlertStore:
             created_at="2026-01-27T10:00:00"
         ))
 
-        # 验证数据库文件存在
+        # Verify the database file exists
         assert Path(temp_db_path).exists()
 
-        # 验证表结构
+        # Verify table structure
         conn = sqlite3.connect(temp_db_path)
         cursor = conn.cursor()
 
-        # 检查 alerts 表
+        # Check the alerts table
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='alerts'")
         assert cursor.fetchone() is not None
 
-        # 检查索引
+        # Check indexes
         cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='alerts'")
         indexes = cursor.fetchall()
         index_names = [row[0] for row in indexes]
@@ -137,13 +137,13 @@ class TestAlertStore:
         conn.close()
 
     def test_add_alert(self, fresh_alert_store, sample_alert):
-        """测试添加告警"""
+        """Test adding an alert"""
         alert_id = fresh_alert_store.add_alert(sample_alert)
 
         assert alert_id == 1
         assert sample_alert.id == alert_id
 
-        # 验证告警已存储
+        # Verify the alert is stored
         conn = sqlite3.connect(fresh_alert_store.db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,))
@@ -155,7 +155,7 @@ class TestAlertStore:
         assert row[5] == 6.2  # metric_value (column 5)
 
     def test_add_multiple_alerts(self, fresh_alert_store):
-        """测试添加多个告警"""
+        """Test adding multiple alerts"""
         from alerts import Alert
 
         for i in range(5):
@@ -172,27 +172,27 @@ class TestAlertStore:
             alert_id = fresh_alert_store.add_alert(alert)
             assert alert_id == i + 1
 
-        # 验证所有告警已存储
+        # Verify all alerts are stored
         active = fresh_alert_store.get_active_alerts()
         assert len(active) == 5
 
     def test_get_active_alerts(self, fresh_alert_store, sample_alerts):
-        """测试获取活动告警"""
-        # 添加告警
+        """Test getting active alerts"""
+        # Add alerts
         for alert in sample_alerts:
             fresh_alert_store.add_alert(alert)
 
         active = fresh_alert_store.get_active_alerts()
 
-        assert len(active) == 2  # 两个 active
+        assert len(active) == 2  # Two active
         assert all(a.status == "active" for a in active)
 
-        # 验证按时间排序 (最新的在前)
+        # Verify sorted by time (newest first)
         times = [a.created_at for a in active]
         assert times == sorted(times, reverse=True)
 
     def test_get_active_alerts_by_sensor(self, fresh_alert_store, sample_alerts):
-        """测试按传感器过滤活动告警"""
+        """Test filtering active alerts by sensor"""
         for alert in sample_alerts:
             fresh_alert_store.add_alert(alert)
 
@@ -200,21 +200,21 @@ class TestAlertStore:
         camera_alerts = fresh_alert_store.get_active_alerts(sensor="camera")
 
         assert len(navi_alerts) == 2
-        assert len(camera_alerts) == 0  # camera 告警已解决
+        assert len(camera_alerts) == 0  # camera alert is resolved
         assert all(a.sensor == "navi_lidar" for a in navi_alerts)
 
     def test_resolve_alert(self, fresh_alert_store, sample_alert):
-        """测试解决告警"""
+        """Test resolving an alert"""
         alert_id = fresh_alert_store.add_alert(sample_alert)
         success = fresh_alert_store.resolve_alert(alert_id)
 
         assert success is True
 
-        # 验证活动告警为空
+        # Verify active alerts is empty
         active = fresh_alert_store.get_active_alerts()
         assert len(active) == 0
 
-        # 验证数据库中的 resolved_at 已设置
+        # Verify resolved_at is set in the database
         conn = sqlite3.connect(fresh_alert_store.db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT status, resolved_at FROM alerts WHERE id = ?", (alert_id,))
@@ -225,22 +225,22 @@ class TestAlertStore:
         assert row[1] is not None
 
     def test_resolve_nonexistent_alert(self, fresh_alert_store):
-        """测试解决不存在的告警"""
+        """Test resolving a non-existent alert"""
         success = fresh_alert_store.resolve_alert(999)
         assert success is False
 
     def test_ignore_alert(self, fresh_alert_store, sample_alert):
-        """测试忽略告警"""
+        """Test ignoring an alert"""
         alert_id = fresh_alert_store.add_alert(sample_alert)
         success = fresh_alert_store.ignore_alert(alert_id)
 
         assert success is True
 
-        # 验证活动告警为空
+        # Verify active alerts is empty
         active = fresh_alert_store.get_active_alerts()
         assert len(active) == 0
 
-        # 验证数据库状态
+        # Verify database status
         conn = sqlite3.connect(fresh_alert_store.db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT status FROM alerts WHERE id = ?", (alert_id,))
@@ -250,7 +250,7 @@ class TestAlertStore:
         assert row[0] == "ignored"
 
     def test_get_alert_stats(self, fresh_alert_store, sample_alerts):
-        """测试获取统计信息"""
+        """Test getting statistics"""
         for alert in sample_alerts:
             fresh_alert_store.add_alert(alert)
 
@@ -264,7 +264,7 @@ class TestAlertStore:
         assert stats['warning'] == 1
 
     def test_get_alerts_by_severity(self, fresh_alert_store, sample_alerts):
-        """测试按严重程度获取告警"""
+        """Test getting alerts by severity"""
         for alert in sample_alerts:
             fresh_alert_store.add_alert(alert)
 
@@ -278,7 +278,7 @@ class TestAlertStore:
         assert all(a.severity == 'warning' for a in warning)
 
     def test_get_alerts_by_sensor_method(self, fresh_alert_store, sample_alerts):
-        """测试 get_alerts_by_sensor 方法"""
+        """Test get_alerts_by_sensor method"""
         for alert in sample_alerts:
             fresh_alert_store.add_alert(alert)
 
@@ -289,15 +289,15 @@ class TestAlertStore:
         assert len(camera_alerts) == 1
 
     def test_get_recent_alerts(self, fresh_alert_store, sample_alerts):
-        """测试获取最近告警（包括已解决）"""
+        """Test getting recent alerts (including resolved)"""
         for alert in sample_alerts:
             fresh_alert_store.add_alert(alert)
 
-        # 获取所有告警（包括已解决）
+        # Get all alerts (including resolved)
         all_alerts = fresh_alert_store.get_recent_alerts(limit=100, include_resolved=True)
         assert len(all_alerts) == 3
 
-        # 测试分页
+        # Test pagination
         page1 = fresh_alert_store.get_recent_alerts(limit=2, offset=0, include_resolved=True)
         page2 = fresh_alert_store.get_recent_alerts(limit=2, offset=2, include_resolved=True)
 
@@ -305,10 +305,10 @@ class TestAlertStore:
         assert len(page2) == 1
 
     def test_cleanup_old_alerts(self, fresh_alert_store):
-        """测试清理旧告警功能"""
+        """Test cleaning up old alerts"""
         from datetime import timedelta
 
-        # 添加一个已解决的旧告警（直接插入数据库以控制时间戳）
+        # Add a resolved old alert (insert directly into database to control timestamp)
         old_time = (datetime.now() - timedelta(days=40)).isoformat()
         fresh_alert_store._conn.execute('''
             INSERT INTO alerts (sensor, alert_type, severity, message,
@@ -317,18 +317,18 @@ class TestAlertStore:
         ''', ("test", "old", "warning", "Old alert", 1.0, 2.0, "{}", old_time, old_time, "resolved"))
         fresh_alert_store._conn.commit()
 
-        # 清理 30 天前的告警
+        # Clean up alerts older than 30 days
         deleted_count = fresh_alert_store.cleanup_old_alerts(days=30)
         assert deleted_count == 1
 
-        # 验证已删除
+        # Verify it has been deleted
         all_alerts = fresh_alert_store.get_recent_alerts()
         assert len(all_alerts) == 0
 
     def test_thread_safety(self, fresh_alert_store):
-        """测试线程安全 - 单线程顺序添加验证"""
-        # SQLite 在多线程写入时有事务限制
-        # 这里改为测试单线程顺序添加，验证 ID 唯一性
+        """Test thread safety - single-thread sequential insertion verification"""
+        # SQLite has transaction limitations with multi-threaded writes
+        # Here we test single-thread sequential insertion to verify ID uniqueness
         results = []
 
         for i in range(10):
@@ -345,20 +345,20 @@ class TestAlertStore:
             alert_id = fresh_alert_store.add_alert(alert)
             results.append(alert_id)
 
-        # 验证所有 ID 唯一
+        # Verify all IDs are unique
         assert len(set(results)) == 10
 
-        # 验证所有告警已存储
+        # Verify all alerts are stored
         active = fresh_alert_store.get_active_alerts()
         assert len(active) == 10
 
 
 class TestAlertStoreIntegration:
-    """AlertStore 集成测试"""
+    """AlertStore integration tests"""
 
     def test_database_persistence(self, temp_db_path):
-        """测试数据库持久化 - 重启后数据保留"""
-        # 重置单例
+        """Test database persistence - data retained after restart"""
+        # Reset singleton
         AlertStore._instance = None
         store1 = AlertStore(db_path=temp_db_path)
 
@@ -374,13 +374,13 @@ class TestAlertStoreIntegration:
         )
         alert_id = store1.add_alert(alert)
 
-        # 关闭第一个实例
+        # Close the first instance
         store1.close()
 
-        # 重置单例
+        # Reset singleton
         AlertStore._instance = None
 
-        # 创建新实例应该读取到相同数据
+        # Creating a new instance should read the same data
         store2 = AlertStore(db_path=temp_db_path)
         alerts = store2.get_active_alerts()
 
@@ -391,7 +391,7 @@ class TestAlertStoreIntegration:
         store2.close()
 
     def test_empty_database_state(self, fresh_alert_store):
-        """测试空数据库状态"""
+        """Test empty database state"""
         active = fresh_alert_store.get_active_alerts()
         assert len(active) == 0
 
@@ -409,10 +409,10 @@ class TestAlertStoreIntegration:
 
 
 class TestGetAlertStore:
-    """get_alert_store() 函数测试"""
+    """get_alert_store() function tests"""
 
     def test_get_alert_store_singleton(self, temp_db_path):
-        """测试 get_alert_store 返回单例"""
+        """Test get_alert_store returns a singleton"""
         if 'alerts' in sys.modules:
             del sys.modules['alerts']
 
@@ -422,23 +422,23 @@ class TestGetAlertStore:
         assert store1 is store2
 
     def test_get_alert_store_default_path(self, tmp_path):
-        """测试 get_alert_store 默认路径"""
+        """Test get_alert_store default path"""
         if 'alerts' in sys.modules:
             del sys.modules['alerts']
 
-        # 重置单例
+        # Reset singleton
         AlertStore._instance = None
         import alerts
         alerts._alert_store_instance = None
 
-        # 测试默认路径构建
+        # Test default path construction
         expected_path = str(Path(__file__).parent.parent / 'alerts.db')
         store = get_alert_store()
 
-        # 验证路径包含 alerts.db
+        # Verify the path contains alerts.db
         assert 'alerts.db' in store.db_path
 
-        # 清理
+        # Cleanup
         store.close()
         AlertStore._instance = None
         alerts._alert_store_instance = None
