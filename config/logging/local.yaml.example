@@ -1,11 +1,11 @@
-# 本地日志配置覆盖模板
-# 复制此文件为 local.yaml 并根据需要修改
-# 使用方法: ./run_ros2_camera.sh --log-config config/logging/local.yaml
+# Local logging configuration override template
+# Copy this file as local.yaml and modify as needed
+# Usage: ./run_ros2_camera.sh --log-config config/logging/local.yaml
 
 default_profile: dev
 
 profiles:
-  # 自定义本地开发配置
+  # Custom local development configuration
   local:
     rcutils:
       use_stdout: 1
