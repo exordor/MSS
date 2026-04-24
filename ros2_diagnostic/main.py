@@ -1195,12 +1195,14 @@ def _build_sensor_result(sensor_name: str) -> Dict[str, Any]:
     }
 
     if sensor_name == 'thruster':
-        if 'temp_humidity' in summary:
-            payload['temp_humidity'] = summary['temp_humidity']
+        temp_humidity = summary.get('temp_humidity')
+        if temp_humidity and any(v is not None for v in temp_humidity.values()):
+            payload['temp_humidity'] = temp_humidity
         if 'thruster_status' in summary:
             payload['thruster_status'] = summary['thruster_status']
-        if 'flow_data' in summary:
-            payload['flow_data'] = summary['flow_data']
+        flow_data = summary.get('flow_data')
+        if flow_data and any(v is not None for v in flow_data.values()):
+            payload['flow_data'] = flow_data
         if 'data_updated_at' in summary:
             payload['data_updated_at'] = summary['data_updated_at']
         if 'connection_info' in summary:

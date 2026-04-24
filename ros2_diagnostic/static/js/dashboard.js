@@ -184,14 +184,10 @@ function updateSensorsDisplay(sensorsData) {
 
     if (!tableBody) return;
 
-    // Update cache (merge for partial updates, per-sensor)
-    if (partial) {
-        Object.entries(sensors).forEach(([name, patch]) => {
-            sensorsCache[name] = { ...(sensorsCache[name] || {}), ...(patch || {}) };
-        });
-    } else {
-        sensorsCache = sensors;
-    }
+    // Update cache — always merge per-sensor to preserve MQTT partial data (e.g. temp_humidity)
+    Object.entries(sensors).forEach(([name, patch]) => {
+        sensorsCache[name] = { ...(sensorsCache[name] || {}), ...(patch || {}) };
+    });
 
     const allSensors = sensorsCache;
 

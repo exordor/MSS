@@ -267,14 +267,10 @@ function handleAlert(data, timestamp) {
 
 function handleSensorsUpdate(data, timestamp) {
     if (data && data.sensors) {
-        if (data.partial) {
-            if (!latestState.sensors || !latestState.sensors.sensors) {
-                latestState.sensors = { sensors: {} };
-            }
-            latestState.sensors.sensors = mergeSensorUpdates(latestState.sensors.sensors, data.sensors);
-        } else {
-            latestState.sensors = data;
+        if (!latestState.sensors || !latestState.sensors.sensors) {
+            latestState.sensors = { sensors: {} };
         }
+        latestState.sensors.sensors = mergeSensorUpdates(latestState.sensors.sensors, data.sensors);
     }
     if (typeof updateSensorsDisplay === 'function') updateSensorsDisplay(data);
     if (hasSensorUI()) {

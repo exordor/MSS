@@ -429,21 +429,6 @@ function updatePi5SensorsPanel(data) {
         }
     }
 
-    const ageEl = document.getElementById('pi5DataAge');
-    if (ageEl) {
-        if (data.water_quality_age_s !== undefined && data.water_quality_age_s !== null) {
-            const ageSeconds = Math.max(0, Number(data.water_quality_age_s));
-            ageEl.textContent = `${ageSeconds.toFixed(1)} s`;
-            ageEl.className = 'info-value ' + (data.water_quality_fresh === false ? 'text-warning' : 'text-success');
-        } else if (hasData) {
-            ageEl.textContent = '0.0 s';
-            ageEl.className = 'info-value text-success';
-        } else {
-            ageEl.textContent = 'No data';
-            ageEl.className = 'info-value';
-        }
-    }
-
     // Water quality
     setInfoValue('pi5C4eTemp', wq.c4e_temp_c, ' °C');
     setInfoValue('pi5Conductivity', wq.c4e_conductivity_uscm, ' µS/cm');
