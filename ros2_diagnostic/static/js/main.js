@@ -60,13 +60,9 @@ class WSConnection {
         const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = this.url || `${protocol}//${location.host}/ws`;
 
-        console.log(`[WS] Connecting to ${wsUrl}...`);
-        console.log(`[WS] Protocol: ${protocol}, Host: ${location.host}`);
         this.ws = new WebSocket(wsUrl);
-        console.log('[WS] WebSocket object created, readyState:', this.ws.readyState);
 
         this.ws.onopen = () => {
-            console.log('[WS] Connected! readyState:', this.ws.readyState);
             this.reconnectAttempts = 0;
             this.reconnectDelay = CONFIG.wsReconnectDelay;
             updateConnectionStatus(true);
@@ -75,14 +71,12 @@ class WSConnection {
             if (this.pingInterval) clearInterval(this.pingInterval);
             this.pingInterval = setInterval(() => {
                 if (this.ws?.readyState === WebSocket.OPEN) {
-                    console.log('[WS] Sending ping...');
                     this.ws.send('ping');
                 }
             }, 30000);
         };
 
         this.ws.onclose = (event) => {
-            console.log(`[WS] Disconnected (code: ${event.code})`);
             updateConnectionStatus(false);
             if (this.pingInterval) {
                 clearInterval(this.pingInterval);
@@ -101,12 +95,10 @@ class WSConnection {
             try {
                 // Handle ping/pong
                 if (event.data === 'pong') {
-                    console.log('[WS] Received pong');
                     return;
                 }
 
                 const msg = JSON.parse(event.data);
-                console.log(`[WS] Received message: type=${msg.type}, timestamp=${msg.timestamp || 'N/A'}`);
 
                 // Call registered handler for this message type
                 if (this.handlers[msg.type]) {
@@ -121,7 +113,6 @@ class WSConnection {
     scheduleReconnect() {
         this.reconnectAttempts++;
         const delay = this.reconnectDelay;
-        console.log(`[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
         setTimeout(() => this.connect(), delay);
         this.reconnectDelay = Math.min(
             this.reconnectDelay * 1.5,
@@ -146,7 +137,6 @@ class WSConnection {
     subscribe(channel) {
         if (this.ws?.readyState === WebSocket.OPEN) {
             this.ws.send(`subscribe:${channel}`);
-            console.log(`[WS] Subscribed to ${channel}`);
         }
     }
 
@@ -157,7 +147,6 @@ class WSConnection {
     unsubscribe(channel) {
         if (this.ws?.readyState === WebSocket.OPEN) {
             this.ws.send(`unsubscribe:${channel}`);
-            console.log(`[WS] Unsubscribed from ${channel}`);
         }
     }
 
@@ -169,7 +158,6 @@ class WSConnection {
         this.unsubscribe('sensors');
         this.unsubscribe('ros2');
         // Keep only alerts
-        console.log('[WS] Low bandwidth mode enabled (alerts only)');
     }
 
     close() {
@@ -188,10 +176,6 @@ class WSConnection {
 // ==========================================
 
 function handleFullState(data, timestamp) {
-    // Handle initial full state on connection
-    console.log('[WS] Received full state');
-    console.log('[PI5_DEBUG] handleFullState pi5 =', data?.sensors?.sensors?.pi5_sensors || null);
-
     if (data.sensors) latestState.sensors = data.sensors;
     if (data.ros2) latestState.ros2 = data.ros2;
     if (data.ros2_control) latestState.ros2_control = data.ros2_control;
@@ -214,9 +198,6 @@ function handleFullState(data, timestamp) {
 }
 
 function handleStateUpdate(data, timestamp) {
-    // Handle incremental state updates
-    console.log('[WS] Received state update');
-
     // Update ROS2 data FIRST, then sensors (so caches are populated)
     if (data.ros2) {
         latestState.ros2 = data.ros2;
@@ -251,9 +232,6 @@ function handleStateUpdate(data, timestamp) {
 }
 
 function handleAlert(data, timestamp) {
-    // Handle real-time alert push (single alert)
-    console.log('[WS] Received real-time alert:', data);
-
     // Add to alerts state
     if (!latestState.alerts) latestState.alerts = [];
     latestState.alerts.unshift(data);  // Add to beginning
@@ -274,9 +252,6 @@ function handleAlert(data, timestamp) {
 }
 
 function handleSensorsUpdate(data, timestamp) {
-    // Handle sensors channel update
-    console.log('[WS] Received sensors update');
-    console.log('[PI5_DEBUG] handleSensorsUpdate incoming =', data?.sensors?.pi5_sensors || data?.sensors || null);
     if (data && data.sensors) {
         if (data.partial) {
             if (!latestState.sensors || !latestState.sensors.sensors) {
@@ -287,7 +262,6 @@ function handleSensorsUpdate(data, timestamp) {
             latestState.sensors = data;
         }
     }
-    console.log('[PI5_DEBUG] handleSensorsUpdate merged =', latestState?.sensors?.sensors?.pi5_sensors || null);
     if (typeof updateSensorsDisplay === 'function') updateSensorsDisplay(data);
     if (hasSensorUI()) {
         markInitialDataUpdated();
@@ -296,8 +270,6 @@ function handleSensorsUpdate(data, timestamp) {
 }
 
 function handleRos2Update(data, timestamp) {
-    // Handle ROS2 channel update
-    console.log('[WS] Received ROS2 update');
     if (data) latestState.ros2 = data;
     if (typeof updateROS2Display === 'function') {
         updateROS2Display(latestState.ros2, latestState.ros2_control);
@@ -306,8 +278,6 @@ function handleRos2Update(data, timestamp) {
 }
 
 function handleRos2ControlUpdate(data, timestamp) {
-    // Handle ROS2 control channel update
-    console.log('[WS] Received ROS2 control update');
     if (data) latestState.ros2_control = data;
     if (typeof updateROS2ControlStatus === 'function') {
         updateROS2ControlStatusFromWS(data);
@@ -316,7 +286,6 @@ function handleRos2ControlUpdate(data, timestamp) {
 }
 
 function handleConnectivityUpdate(data, timestamp) {
-    console.log('[WS] Received connectivity update');
     if (data && data.sensors) {
         if (!latestState.sensors || !latestState.sensors.sensors) {
             latestState.sensors = { sensors: {} };
@@ -333,8 +302,6 @@ function handleConnectivityUpdate(data, timestamp) {
 }
 
 function handleRosbagUpdate(data, timestamp) {
-    // Handle rosbag channel update
-    console.log('[WS] Received rosbag update');
     if (data) latestState.rosbag = data;
     if (typeof updateRosbagDisplay === 'function') updateRosbagDisplay(data);
     updateLastUpdated();
@@ -748,22 +715,15 @@ function updateNotificationBadge(count) {
 // ==========================================
 
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('[Main] DOM loaded, initializing WebSocket...');
-    console.log('[Main] Current URL:', window.location.href);
-    console.log('[Main] Host:', window.location.host);
-    console.log('[Main] Protocol:', window.location.protocol);
-
     // Show pending data message on page load/refresh
     showInitialDataPending();
 
     // Initialize WebSocket connection
-    console.log('[Main] Creating WSConnection instance...');
     wsConnection = new WSConnection();
     // Expose globally for testing/debugging
     window.wsConnection = wsConnection;
 
     // Register WebSocket message handlers
-    console.log('[Main] Registering message handlers...');
     wsConnection.on('full_state', handleFullState);
     wsConnection.on('state_update', handleStateUpdate);
     wsConnection.on('alert', handleAlert);  // Real-time alert push
@@ -776,9 +736,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initial update
     updateLastUpdated();
-
-    console.log('[Main] WebSocket connection initialized');
-    console.log('[Main] Connection object:', wsConnection);
 });
 
 // Cleanup on page unload

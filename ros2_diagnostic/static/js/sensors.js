@@ -79,7 +79,6 @@ function updateSensorsDisplay(sensorsData) {
     }
 
     const allSensors = sensorsCache;
-    console.log('[PI5_DEBUG] updateSensorsDisplay partial=', partial, 'pi5=', allSensors.pi5_sensors || null);
 
     // Update each sensor panel
     updateNaviLidarPanel(allSensors.navi_lidar);
@@ -400,7 +399,6 @@ function updateBatteryPanel(data) {
 
 function updatePi5SensorsPanel(data) {
     if (!data) return;
-    console.log('[PI5_DEBUG] updatePi5SensorsPanel incoming =', data);
 
     const badge = document.getElementById('pi5SensorsStatusBadge');
     if (badge) {
@@ -468,26 +466,6 @@ function updatePi5SensorsPanel(data) {
         setInfoValue('pi5UpsValue', ups.value, '');
     }
     setInfoText('pi5UpsState', ups.state);
-
-    window.__PI5_DEBUG_LAST__ = {
-        timestamp: new Date().toISOString(),
-        incoming: data,
-        dom: {
-            status: document.getElementById('pi5SensorsStatusBadge')?.textContent || null,
-            network: document.getElementById('pi5NetworkStatus')?.textContent || null,
-            mqtt: document.getElementById('pi5MqttStatus')?.textContent || null,
-            dataAge: document.getElementById('pi5DataAge')?.textContent || null,
-            c4eTemp: document.getElementById('pi5C4eTemp')?.textContent || null,
-            conductivity: document.getElementById('pi5Conductivity')?.textContent || null,
-            o2Ppm: document.getElementById('pi5O2Ppm')?.textContent || null,
-            ph: document.getElementById('pi5Ph')?.textContent || null,
-            redox: document.getElementById('pi5Redox')?.textContent || null,
-            phMv: document.getElementById('pi5PhMv')?.textContent || null,
-            upsState: document.getElementById('pi5UpsState')?.textContent || null,
-        }
-    };
-    window.pi5DebugSnapshot = function() { return window.__PI5_DEBUG_LAST__; };
-    console.log('[PI5_DEBUG] updatePi5SensorsPanel dom =', window.__PI5_DEBUG_LAST__);
 }
 
 function setInfoValue(id, value, suffix) {

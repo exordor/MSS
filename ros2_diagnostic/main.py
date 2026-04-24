@@ -513,17 +513,6 @@ class ConnectionManager:
             "timestamp": time.time()
         })
 
-        if "sensors" in state:
-            pi5_data = state.get("sensors", {}).get("sensors", {}).get("pi5_sensors")
-            if pi5_data is not None:
-                logger.info(
-                    "[PI5_DEBUG] full_state pi5 status=%s has_wq=%s has_ups=%s keys=%s",
-                    pi5_data.get("status"),
-                    bool(pi5_data.get("water_quality")),
-                    bool(pi5_data.get("ups")),
-                    sorted(pi5_data.keys()),
-                )
-
         # Send subscription confirmation
         await websocket.send_json({
             "type": "subscribed",
@@ -1138,14 +1127,6 @@ def _build_sensor_result(sensor_name: str) -> Dict[str, Any]:
     elif sensor_name == 'pi5_sensors':
         _attach_pi5_fields(payload, metrics, summary)
 
-        logger.info(
-            "[PI5_DEBUG] _check_single_sensor summary_keys=%s result_status=%s has_wq=%s has_ups=%s",
-            sorted(summary.keys()),
-            payload.get('status'),
-            bool(payload.get('water_quality')),
-            bool(payload.get('ups')),
-        )
-
     return payload
 
 
@@ -1227,15 +1208,6 @@ async def _broadcast_sensors_incremental() -> Dict[str, Any]:
 
         sensors[name] = result
 
-        if name == 'pi5_sensors':
-            logger.info(
-                "[PI5_DEBUG] broadcast partial status=%s has_wq=%s has_ups=%s keys=%s",
-                result.get('status'),
-                bool(result.get('water_quality')),
-                bool(result.get('ups')),
-                sorted(result.keys()),
-            )
-
         await manager.broadcast_to_channel(
             Channel.SENSORS,
             {
@@ -1251,16 +1223,6 @@ async def _broadcast_sensors_incremental() -> Dict[str, Any]:
     # Final full summary update (keeps backward compatibility)
     result = _summarize_sensor_results(sensors)
     _cache_set('sensors:status', result)
-
-    pi5_data = result.get('sensors', {}).get('pi5_sensors')
-    if pi5_data is not None:
-        logger.info(
-            "[PI5_DEBUG] broadcast final status=%s has_wq=%s has_ups=%s keys=%s",
-            pi5_data.get('status'),
-            bool(pi5_data.get('water_quality')),
-            bool(pi5_data.get('ups')),
-            sorted(pi5_data.keys()),
-        )
 
     await manager.broadcast_to_channel(
         Channel.SENSORS,
