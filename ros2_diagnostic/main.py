@@ -38,7 +38,7 @@ from config import (
     ENABLE_TOPIC_DETAILS, CACHE_TTL, LOG_FILES, LOG_ROOT, UI_CONFIG, PROJECT_ROOT,
     LOG_ROTATION,
     TOOLS_CONFIG_FILES, TOOLS_SCRIPTS, EVENT_LOG_CONFIG, SENSOR_I2C, TIME_CONFIG,
-    MQTT_CONFIG
+    MQTT_CONFIG, WEBSOCKET_CONFIG
 )
 from diagnostics import ROS2Monitor, ROS2Controller, get_ros2_helper
 from diagnostics.rosbag_controller import get_rosbag_controller
@@ -290,6 +290,50 @@ class Channel(Enum):
     TIME = "time"            # System/PHC time (1s)
 
 
+WS_SCHEMA_VERSION = "2.0"
+_ws_app_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _configured_channels(names: List[str]) -> Set[Channel]:
+    channels: Set[Channel] = set()
+    for name in names:
+        try:
+            channels.add(Channel(name))
+        except ValueError:
+            logger.warning("[WS] Ignoring unknown configured channel: %s", name)
+    return channels
+
+
+def _default_channels() -> Set[Channel]:
+    channels = _configured_channels(WEBSOCKET_CONFIG.get("default_channels", []))
+    if channels:
+        return channels
+    return {
+        Channel.SENSORS,
+        Channel.CONNECTIVITY,
+        Channel.ALERTS,
+        Channel.ROS2,
+        Channel.ROS2_CONTROL,
+        Channel.ROSBAG,
+        Channel.TIME,
+    }
+
+
+def _channel_message(channel: Channel, data: Any) -> Dict[str, Any]:
+    return {
+        "type": f"{channel.value}_update",
+        "channel": channel.value,
+        "data": data,
+        "timestamp": time.time(),
+        "schema_version": WS_SCHEMA_VERSION,
+    }
+
+
+def _channel_cache_ttl(channel: Channel, fallback: float) -> float:
+    channel_cfg = WEBSOCKET_CONFIG.get("channels", {}).get(channel.value, {})
+    return float(channel_cfg.get("cache_ttl_sec", fallback))
+
+
 @dataclass
 class ConnectionInfo:
     """WebSocket connection info"""
@@ -314,14 +358,23 @@ class ConnectionManager:
         self,
         websocket: WebSocket,
         channels: List[Channel] = None
-    ):
+    ) -> bool:
         """Accept new connection with default subscriptions"""
+        max_connections = max(int(WEBSOCKET_CONFIG.get("max_connections", 10)), 1)
+        with self._lock:
+            over_limit = len(self.connections) >= max_connections
+        if over_limit:
+            logger.warning("[WS] Rejecting connection: max_connections=%s", max_connections)
+            await websocket.close(code=1008)
+            return False
+
+        subscribed_channels = set(channels) if channels else _default_channels()
         await websocket.accept()
 
         with self._lock:
             self.connections[websocket] = ConnectionInfo(
                 websocket=websocket,
-                channels=set(channels or [Channel.SENSORS, Channel.CONNECTIVITY, Channel.ALERTS, Channel.ROS2, Channel.ROS2_CONTROL, Channel.ROSBAG, Channel.TIME]),
+                channels=subscribed_channels,
                 connected_at=time.time()
             )
 
@@ -330,6 +383,7 @@ class ConnectionManager:
             f"{[c.value for c in self.connections[websocket].channels]}, "
             f"Total: {len(self.connections)}"
         )
+        return True
 
     async def subscribe(self, websocket: WebSocket, channel: Channel):
         """Subscribe to a channel"""
@@ -370,12 +424,42 @@ class ConnectionManager:
         for ws in disconnected:
             await self._async_disconnect(ws)
 
+    async def broadcast_to_any_channel(
+        self,
+        channels: Set[Channel],
+        message: dict
+    ):
+        """Broadcast to clients subscribed to at least one of the given channels."""
+        disconnected = []
+
+        with self._lock:
+            target_connections = [
+                ws for ws, info in self.connections.items()
+                if info.channels.intersection(channels)
+            ]
+
+        for ws in target_connections:
+            try:
+                await ws.send_json(message)
+            except Exception as e:
+                logger.debug(f"[WS] Send failed: {e}")
+                disconnected.append(ws)
+
+        for ws in disconnected:
+            await self._async_disconnect(ws)
+
     def disconnect(self, websocket: WebSocket):
         """Remove a WebSocket connection"""
         with self._lock:
             if websocket in self.connections:
                 del self.connections[websocket]
         logger.info(f"[WS] Disconnected. Total: {len(self.connections)}")
+
+    @property
+    def active_connections(self) -> List[WebSocket]:
+        """Compatibility view for older tests/tools."""
+        with self._lock:
+            return list(self.connections.keys())
 
     async def send_personal(self, message: dict, websocket: WebSocket):
         """Send a message to a specific WebSocket connection"""
@@ -384,26 +468,6 @@ class ConnectionManager:
         except Exception as e:
             logger.error(f"Error sending to WebSocket: {e}")
             await self._async_disconnect(websocket)
-
-    async def broadcast(self, message: dict):
-        """Broadcast a message to all connected WebSocket clients (legacy, for alerts)"""
-        disconnected = []
-
-        # Copy connections list to avoid modification during iteration
-        with self._lock:
-            connections = list(self.connections.items())
-
-        # Send to all connections (outside lock to avoid blocking)
-        for connection, info in connections:
-            try:
-                await connection.send_json(message)
-            except Exception as e:
-                logger.debug(f"Failed to send to connection: {e}")
-                disconnected.append(connection)
-
-        # Remove disconnected clients (with proper locking)
-        for ws in disconnected:
-            await self._async_disconnect(ws)
 
     async def _async_disconnect(self, websocket: WebSocket):
         """Async version of disconnect for use within async context"""
@@ -430,42 +494,51 @@ class ConnectionManager:
                     channels = info.channels
                 else:
                     # Default channels - send all data needed by dashboard
-                    channels = {Channel.SENSORS, Channel.CONNECTIVITY, Channel.ALERTS, Channel.ROS2, Channel.ROS2_CONTROL, Channel.ROSBAG}
+                    channels = _default_channels()
+        channels = set(channels)
 
         state: Dict[str, Any] = {}
         missing: Set[Channel] = set()
 
         # Fast path: use cached snapshots when available
         if Channel.SENSORS in channels:
-            cached = _cache_get('sensors:status', max_age=CACHE_TTL.get('sensors', 2))
+            cached = _cache_get('sensors:status', max_age=_channel_cache_ttl(Channel.SENSORS, CACHE_TTL.get('sensors', 2)))
             if cached is not None:
                 state["sensors"] = cached
             else:
                 missing.add(Channel.SENSORS)
         if Channel.ROS2 in channels:
-            cached = _cache_get('ros2:status', max_age=CACHE_TTL.get('ros2', 3))
+            cached = _cache_get('ros2:status', max_age=_channel_cache_ttl(Channel.ROS2, CACHE_TTL.get('ros2', 3)))
             if cached is not None:
                 state["ros2"] = cached
             else:
                 missing.add(Channel.ROS2)
         if Channel.ROS2_CONTROL in channels:
-            cached = _cache_get('ros2_control:status', max_age=CACHE_TTL.get('ros2_control', 1))
+            cached = _cache_get('ros2_control:status', max_age=_channel_cache_ttl(Channel.ROS2_CONTROL, CACHE_TTL.get('ros2_control', 1)))
             if cached is not None:
                 state["ros2_control"] = cached
             else:
                 missing.add(Channel.ROS2_CONTROL)
         if Channel.ROSBAG in channels:
-            cached = _cache_get('rosbag:status', max_age=CACHE_TTL.get('rosbag', 1))
+            cached = _cache_get('rosbag:status', max_age=_channel_cache_ttl(Channel.ROSBAG, CACHE_TTL.get('rosbag', 1)))
             if cached is not None:
                 state["rosbag"] = cached
             else:
                 missing.add(Channel.ROSBAG)
         if Channel.ALERTS in channels:
-            cached = _cache_get('alerts:active', max_age=CACHE_TTL.get('alerts', 1))
+            cached = _cache_get('alerts:active', max_age=_channel_cache_ttl(Channel.ALERTS, CACHE_TTL.get('alerts', 1)))
             if cached is not None:
                 state["alerts"] = cached
             else:
                 missing.add(Channel.ALERTS)
+        if Channel.TIME in channels:
+            refresh_ms = UI_CONFIG.get("time_refresh_interval", 1000)
+            max_age = max(0.2, float(refresh_ms) / 1000.0)
+            cached = _cache_get('time:status', max_age=_channel_cache_ttl(Channel.TIME, max_age))
+            if cached is not None:
+                state["time"] = cached
+            else:
+                missing.add(Channel.TIME)
 
         # Slow path: collect missing channels in parallel
         if missing:
@@ -480,6 +553,10 @@ class ConnectionManager:
                 tasks["rosbag"] = asyncio.to_thread(collect_rosbag_status)
             if Channel.ALERTS in missing:
                 tasks["alerts"] = asyncio.to_thread(collect_active_alerts)
+            if Channel.TIME in missing:
+                refresh_ms = UI_CONFIG.get("time_refresh_interval", 1000)
+                max_age = max(0.2, float(refresh_ms) / 1000.0)
+                tasks["time"] = asyncio.to_thread(collect_time_status_cached, max_age)
 
             results = await asyncio.gather(*tasks.values(), return_exceptions=True)
             for key, result in zip(tasks.keys(), results):
@@ -492,6 +569,8 @@ class ConnectionManager:
                         state[key] = {"running": False}
                     elif key == "rosbag":
                         state[key] = {"recording": False}
+                    elif key == "time":
+                        state[key] = {}
                     else:
                         state[key] = {}
                 else:
@@ -507,18 +586,15 @@ class ConnectionManager:
                         _cache_set('rosbag:status', result)
                     elif key == "alerts":
                         _cache_set('alerts:active', result)
+                    elif key == "time":
+                        _cache_set('time:status', result)
 
         await websocket.send_json({
             "type": "full_state",
             "data": state,
-            "timestamp": time.time()
-        })
-
-        # Send subscription confirmation
-        await websocket.send_json({
-            "type": "subscribed",
             "channels": [c.value for c in channels],
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            "schema_version": WS_SCHEMA_VERSION
         })
 
     def get_connection_count(self) -> int:
@@ -528,60 +604,6 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
-
-
-# =============================================================================
-# Message Compressor (for WebSocket message compression)
-# =============================================================================
-
-class MessageCompressor:
-    """Message compressor - shortens field names and gzip compression"""
-
-    # Field name mapping (shortens common fields)
-    FIELD_MAP = {
-        'sensors': 's',
-        'ros2': 'r2',
-        'ros2_control': 'r2c',
-        'rosbag': 'rb',
-        'alerts': 'a',
-        'status': 'st',
-        'message': 'msg',
-        'frequency': 'freq',
-        'timestamp': 'ts',
-        'navi_lidar': 'nl',
-        'uli_lidar': 'ul',
-        'camera': 'cam',
-        'imu': 'imu',
-        'thruster': 'th',
-        'battery': 'bat',
-        'alert_type': 'at',
-        'metric_value': 'mv',
-        'created_at': 'ca',
-        'resolved_at': 'ra',
-    }
-
-    @classmethod
-    def minify_json(cls, data: dict) -> dict:
-        """Shorten JSON field names"""
-        if isinstance(data, dict):
-            return {
-                cls.FIELD_MAP.get(k, k): cls.minify_json(v)
-                for k, v in data.items()
-            }
-        elif isinstance(data, list):
-            return [cls.minify_json(item) for item in data]
-        return data
-
-    @classmethod
-    def compress(cls, data: dict) -> bytes:
-        """Compress message (minify + gzip)"""
-        import gzip as gzip_module
-        # First shorten field names
-        minified = cls.minify_json(data)
-        # Convert to JSON
-        json_str = json.dumps(minified, separators=(',', ':'))
-        # Gzip compress
-        return gzip_module.compress(json_str.encode())
 
 
 # =============================================================================
@@ -615,19 +637,80 @@ async def broadcast_alert(alert: Any) -> None:
                 'status': getattr(alert, 'status', 'active'),
             }
 
-        await manager.broadcast({
+        await manager.broadcast_to_channel(Channel.ALERTS, {
             "type": "alert",
+            "channel": Channel.ALERTS.value,
             "data": alert_dict,
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            "schema_version": WS_SCHEMA_VERSION,
         })
+        _cache_set('alerts:active', collect_active_alerts())
         logger.info(f"[WS] Alert broadcasted: {alert_dict.get('alert_type')} - {alert_dict.get('message')}")
     except Exception as e:
         logger.error(f"[WS] Failed to broadcast alert: {e}")
 
 
+def schedule_alert_broadcast(alert: Any) -> None:
+    """Schedule alert broadcast on the FastAPI application event loop."""
+    loop = _ws_app_loop
+    if loop is None or loop.is_closed():
+        logger.warning("[WS] Alert callback skipped: application loop is unavailable")
+        return
+
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+
+    if running_loop is loop:
+        loop.create_task(broadcast_alert(alert))
+    else:
+        asyncio.run_coroutine_threadsafe(broadcast_alert(alert), loop)
+
+
 # =============================================================================
-# Helper Functions
+# Event-Driven Thruster MQTT Broadcast (real-time push)
 # =============================================================================
+
+# Per-data-type throttle: max broadcast interval (seconds).  0.2s = 5 Hz cap.
+_THRUSTER_MQTT_MIN_INTERVAL = 0.2
+_thruster_mqtt_last_broadcast: Dict[str, float] = {}
+
+
+async def broadcast_thruster_mqtt(data_type: str, payload: dict) -> None:
+    """Immediately push thruster MQTT data as a partial sensors_update."""
+    now = time.monotonic()
+    last = _thruster_mqtt_last_broadcast.get(data_type, 0.0)
+    if now - last < _THRUSTER_MQTT_MIN_INTERVAL:
+        return
+    _thruster_mqtt_last_broadcast[data_type] = now
+
+    try:
+        await manager.broadcast_to_channel(Channel.SENSORS, {
+            "type": "sensors_update",
+            "channel": Channel.SENSORS.value,
+            "data": {
+                "sensors": {
+                    "thruster": {data_type: payload},
+                },
+                "partial": True,
+            },
+            "timestamp": time.time(),
+            "schema_version": WS_SCHEMA_VERSION,
+        })
+    except Exception as e:
+        logger.debug(f"[WS] Thruster MQTT broadcast failed: {e}")
+
+
+def schedule_thruster_mqtt_broadcast(data_type: str, payload: dict) -> None:
+    """Schedule thruster MQTT broadcast from the paho-mqtt thread."""
+    loop = _ws_app_loop
+    if loop is None or loop.is_closed():
+        return
+    asyncio.run_coroutine_threadsafe(
+        broadcast_thruster_mqtt(data_type, payload), loop
+    )
+
 
 # =============================================================================
 # Helper Functions
@@ -1191,47 +1274,12 @@ def _summarize_sensor_results(sensors: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def _broadcast_sensors_incremental() -> Dict[str, Any]:
-    """Broadcast sensor updates incrementally as each check completes."""
-    async def _run_sensor_check(name: str):
-        try:
-            return name, await check_sensor_async(name)
-        except Exception as e:
-            return name, e
-
-    tasks = [asyncio.create_task(_run_sensor_check(name)) for name in SENSOR_NAMES]
-    sensors: Dict[str, Any] = {}
-
-    for task in asyncio.as_completed(tasks):
-        name, result = await task
-        if isinstance(result, Exception):
-            logger.debug(f"Error collecting {name}: {result}")
-            result = _error_sensor_result(result)
-
-        sensors[name] = result
-
-        await manager.broadcast_to_channel(
-            Channel.SENSORS,
-            {
-                "type": "sensors_update",
-                "data": {
-                    "sensors": {name: result},
-                    "partial": True
-                },
-                "timestamp": time.time()
-            }
-        )
-
-    # Final full summary update (keeps backward compatibility)
-    result = _summarize_sensor_results(sensors)
-    _cache_set('sensors:status', result)
+    """Broadcast one complete sensor diagnostic snapshot."""
+    result = await collect_sensor_status_parallel()
 
     await manager.broadcast_to_channel(
         Channel.SENSORS,
-        {
-            "type": "sensors_update",
-            "data": result,
-            "timestamp": time.time()
-        }
+        _channel_message(Channel.SENSORS, result)
     )
 
     return result
@@ -1281,25 +1329,24 @@ def _collect_connectivity_sync(sensor_name: str) -> Dict[str, Any]:
 
 
 async def _broadcast_connectivity_incremental() -> None:
-    """Broadcast connectivity updates incrementally."""
+    """Broadcast one lightweight connectivity snapshot."""
     async def _run(name: str):
         return name, await asyncio.to_thread(_collect_connectivity_sync, name)
 
     tasks = [asyncio.create_task(_run(name)) for name in SENSOR_NAMES]
+    sensors: Dict[str, Any] = {}
 
     for task in asyncio.as_completed(tasks):
         name, payload = await task
-        await manager.broadcast_to_channel(
-            Channel.CONNECTIVITY,
-            {
-                "type": "connectivity_update",
-                "data": {
-                    "sensors": {name: payload},
-                    "partial": True
-                },
-                "timestamp": time.time()
-            }
-        )
+        sensors[name] = payload
+
+    await manager.broadcast_to_channel(
+        Channel.CONNECTIVITY,
+        _channel_message(Channel.CONNECTIVITY, {
+            "sensors": sensors,
+            "partial": True,
+        })
+    )
 
 
 def collect_ros2_status_cached() -> Dict[str, Any]:
@@ -1621,77 +1668,67 @@ def collect_active_alerts() -> List[Dict]:
 # =============================================================================
 
 # Channel configuration (separated by update frequency)
-CHANNEL_CONFIG = {
-    Channel.SENSORS: {
-        "interval": 0.5,      # 0.5s update (real-time response)
-        "priority": "high",   # High priority
-        "cache_ttl": 0.5,     # 0.5s cache (minimize latency)
-    },
-    Channel.CONNECTIVITY: {
-        "interval": 0.5,      # Connectivity fast update
-        "priority": "high",
-        "cache_ttl": 0,
-    },
-    Channel.ALERTS: {
-        "interval": 0,        # Real-time push (triggered by callback)
-        "priority": "critical",
-        "cache_ttl": 0,
-    },
-    Channel.ROS2: {
-        "interval": 10,       # 10s update
-        "priority": "low",
-        "cache_ttl": 5,
-    },
-    Channel.ROS2_CONTROL: {
-        "interval": 1,
-        "priority": "medium",
-        "cache_ttl": 3,
-    },
-    Channel.ROSBAG: {
-        "interval": 5,
-        "priority": "medium",
-        "cache_ttl": 2,
-    },
-    Channel.TIME: {
-        "interval": 1,
-        "priority": "medium",
-        "cache_ttl": 1,
-    },
+def _build_channel_config() -> Dict[Channel, Dict[str, Any]]:
+    configured: Dict[Channel, Dict[str, Any]] = {}
+    raw_channels = WEBSOCKET_CONFIG.get("channels", {})
+
+    for channel in Channel:
+        raw_config = raw_channels.get(channel.value, {})
+        if not raw_config.get("enabled", True):
+            continue
+        configured[channel] = {
+            "interval": float(raw_config.get("interval_sec", 1.0)),
+            "cache_ttl": float(raw_config.get("cache_ttl_sec", 1.0)),
+        }
+
+    return configured
+
+
+CHANNEL_CONFIG = _build_channel_config()
+LEGACY_STATE_CHANNELS = {
+    Channel.SENSORS,
+    Channel.CONNECTIVITY,
+    Channel.ALERTS,
+    Channel.ROS2,
+    Channel.ROS2_CONTROL,
+    Channel.ROSBAG,
 }
 
-async def background_broadcaster():
-    """Async background task to broadcast updates to all WebSocket clients"""
+
+async def _legacy_state_update_loop(interval: float) -> None:
+    """Compatibility broadcaster for old clients that still consume state_update."""
     global _prev_state
+    interval = max(float(interval), 0.5)
+
     while True:
         try:
-            # Collect state with parallel sensor checks for better performance
             new_state = await collect_all_state_async()
-
-            # Calculate diff for incremental updates
             diff = calculate_state_diff(_prev_state, new_state)
 
+            with _state_lock:
+                _prev_state = new_state
+
             if diff:
-                # Broadcast incremental update
-                await manager.broadcast({
-                    "type": "state_update",
-                    "data": diff,
-                    "timestamp": time.time()
-                })
+                await manager.broadcast_to_any_channel(
+                    LEGACY_STATE_CHANNELS,
+                    {
+                        "type": "state_update",
+                        "data": diff,
+                        "timestamp": time.time(),
+                        "schema_version": WS_SCHEMA_VERSION,
+                        "deprecated": True,
+                    }
+                )
+                logger.debug(
+                    "[WS] Legacy state_update broadcasted to %s clients, diff keys: %s",
+                    manager.get_connection_count(),
+                    list(diff.keys()),
+                )
 
-                # Update previous state
-                with _state_lock:
-                    _prev_state = new_state
-            else:
-                # No change, just update timestamp reference
-                with _state_lock:
-                    _prev_state = new_state
-
-            logger.debug(f"Broadcasted state update to {manager.get_connection_count()} clients, diff keys: {list(diff.keys())}")
-
-            await asyncio.sleep(5)
+            await asyncio.sleep(interval)
         except Exception as e:
-            logger.error(f"Background broadcaster error: {e}")
-            await asyncio.sleep(10)
+            logger.error(f"Legacy state_update broadcaster error: {e}")
+            await asyncio.sleep(max(interval, 5.0))
 
 
 async def _collect_channel_data(channel: Channel) -> Dict[str, Any]:
@@ -1715,6 +1752,7 @@ async def _collect_channel_data(channel: Channel) -> Dict[str, Any]:
         refresh_ms = UI_CONFIG.get("time_refresh_interval", 1000)
         max_age = max(0.2, float(refresh_ms) / 1000.0)
         data = await asyncio.to_thread(collect_time_status_cached, max_age)
+        _cache_set('time:status', data)
         return data
     if channel == Channel.ALERTS:
         data = await asyncio.to_thread(collect_active_alerts)
@@ -1756,11 +1794,7 @@ async def _channel_broadcaster_loop(channel: Channel, interval: float) -> None:
                     broadcast_start = time.monotonic()
                     await manager.broadcast_to_channel(
                         channel,
-                        {
-                            "type": f"{channel.value}_update",
-                            "data": data,
-                            "timestamp": time.time()
-                        }
+                        _channel_message(channel, data)
                     )
                     broadcast_end = time.monotonic()
 
@@ -1788,11 +1822,17 @@ async def background_broadcaster_channelized():
     for channel, config in CHANNEL_CONFIG.items():
         interval = config["interval"]
 
-        # Real-time alerts handled by callback, skip
-        if interval == 0:
+        # Real-time alerts handled by callback; non-positive intervals are disabled.
+        if interval <= 0:
             continue
 
         tasks.append(asyncio.create_task(_channel_broadcaster_loop(channel, interval)))
+
+    legacy_config = WEBSOCKET_CONFIG.get("legacy_state_update", {})
+    if legacy_config.get("enabled", True):
+        tasks.append(asyncio.create_task(
+            _legacy_state_update_loop(float(legacy_config.get("interval_sec", 5.0)))
+        ))
 
     if not tasks:
         return
@@ -1882,7 +1922,10 @@ async def warm_cache_on_startup():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan"""
+    global _ws_app_loop
+
     # Startup
+    _ws_app_loop = asyncio.get_running_loop()
     logger.info("Starting ROS2 System Diagnostic Server (FastAPI)...")
     logger.info(f"Project root: {PROJECT_ROOT}")
     logger.info(f"Access the web interface at: http://localhost:5000")
@@ -1902,6 +1945,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down...")
+    _ws_app_loop = None
 
     # Stop ROS2 process if running
     try:
@@ -1940,11 +1984,19 @@ async def background_init():
         # 2. Initialize alert storage and callback (deferred to background)
         from alerts import get_alert_store
         alert_store = get_alert_store()
-        alert_store.set_alert_callback(broadcast_alert)
+        alert_store.set_alert_callback(schedule_alert_broadcast)
         logger.info("[WS] Alert callback registered (background)")
 
         # 2.5 Initialize event statistics cache callback
         _ensure_event_store_callback()
+
+        # 2.6 Register event-driven MQTT callback for thruster real-time push
+        try:
+            thruster_monitor = get_monitor('thruster')
+            thruster_monitor.set_mqtt_data_callback(schedule_thruster_mqtt_broadcast)
+            logger.info("[WS] Thruster MQTT data callback registered (background)")
+        except Exception as e:
+            logger.warning(f"[WS] Failed to register thruster MQTT callback: {e}")
 
         # 3. Log startup event (deferred to background)
         if EVENT_LOG_CONFIG.get("enabled", True):
@@ -1977,6 +2029,7 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 templates.env.globals["frontend_sensor_defs_json"] = json.dumps(_build_frontend_sensor_catalog())
+templates.env.globals["websocket_config_json"] = json.dumps(WEBSOCKET_CONFIG)
 
 
 # =============================================================================
@@ -2075,10 +2128,12 @@ async def events(request: Request):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint - supports subscribe/unsubscribe"""
-    await manager.connect(websocket)
+    connected = await manager.connect(websocket)
+    if not connected:
+        return
 
     try:
-        # Send initial full state (includes subscription confirmation)
+        # Send initial full state. Explicit subscribe/unsubscribe commands get ack frames.
         await manager.send_full_state(websocket)
 
         # Handle client messages
@@ -2096,13 +2151,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json({
                         "type": "subscribed",
                         "channel": channel_name,
-                        "timestamp": time.time()
+                        "timestamp": time.time(),
+                        "schema_version": WS_SCHEMA_VERSION
                     })
                 except ValueError:
                     await websocket.send_json({
                         "type": "error",
                         "message": f"Unknown channel: {channel_name}",
-                        "timestamp": time.time()
+                        "timestamp": time.time(),
+                        "schema_version": WS_SCHEMA_VERSION
                     })
             elif data.startswith("unsubscribe:"):
                 channel_name = data.split(":", 1)[1]
@@ -2112,7 +2169,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json({
                         "type": "unsubscribed",
                         "channel": channel_name,
-                        "timestamp": time.time()
+                        "timestamp": time.time(),
+                        "schema_version": WS_SCHEMA_VERSION
                     })
                 except ValueError:
                     pass  # Ignore invalid channel

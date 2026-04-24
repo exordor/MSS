@@ -93,6 +93,9 @@ class ThrusterDiagnostic(BaseDiagnostic):
         self._connection_grace_period = float(thresholds.get('connection_grace_period', 30))
         self._max_consecutive_failures = int(thresholds.get('max_consecutive_failures', 3))
 
+        # MQTT data callback for event-driven WebSocket push
+        self._mqtt_data_callback = None
+
         # Alert tracking to avoid duplicate alerts
         self._last_alert_time = {}  # alert_type -> last_timestamp
         self._alert_cooldown = 60  # seconds between same alert type
@@ -239,6 +242,16 @@ class ThrusterDiagnostic(BaseDiagnostic):
                 mqtt_client.subscribe(topic, callback)
                 logger.info(f"Thruster MQTT subscribed: {topic}")
 
+    def set_mqtt_data_callback(self, callback):
+        """Set callback for event-driven MQTT data push.
+
+        Args:
+            callback: Callable(data_type: str, payload: dict) that bridges
+                      to the async WebSocket broadcast. Called from the
+                      paho-mqtt thread.
+        """
+        self._mqtt_data_callback = callback
+
     def _on_mqtt_thruster_status(self, topic: str, payload):
         """Handle arduino/thruster/status MQTT message."""
         try:
@@ -254,6 +267,8 @@ class ThrusterDiagnostic(BaseDiagnostic):
                     'right_pwm': payload.get('right_us', 1500),
                 }
                 self._last_thruster_status_time = now
+            if self._mqtt_data_callback:
+                self._mqtt_data_callback('thruster_status', self._latest_thruster_status)
         except Exception as e:
             logger.debug(f"MQTT thruster status parse error: {e}")
 
@@ -270,6 +285,8 @@ class ThrusterDiagnostic(BaseDiagnostic):
                     'total_liters': payload.get('total_liters', 0),
                 }
                 self._last_flow_data_time = now
+            if self._mqtt_data_callback:
+                self._mqtt_data_callback('flow_data', self._latest_flow_data)
         except Exception as e:
             logger.debug(f"MQTT flow status parse error: {e}")
 
@@ -288,6 +305,8 @@ class ThrusterDiagnostic(BaseDiagnostic):
                     'humidity2': s2.get('hum_pct'),
                 }
                 self._last_temp_humidity_time = now
+            if self._mqtt_data_callback:
+                self._mqtt_data_callback('temp_humidity', self._latest_temp_humidity)
         except Exception as e:
             logger.debug(f"MQTT DHT status parse error: {e}")
 

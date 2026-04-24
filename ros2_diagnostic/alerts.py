@@ -136,13 +136,8 @@ class AlertStore:
                 if asyncio.iscoroutinefunction(self._alert_callback):
                     await self._alert_callback(alert)
                 else:
-                    # Plain function, schedule in asyncio event loop
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        asyncio.create_task(self._alert_callback(alert))
-                    else:
-                        # If event loop is not running, call directly
-                        self._alert_callback(alert)
+                    # Plain callbacks are responsible for their own dispatching.
+                    self._alert_callback(alert)
             except Exception as e:
                 print(f"Error in alert callback: {e}")
 
@@ -169,27 +164,26 @@ class AlertStore:
         # Trigger real-time push callback (async execution, non-blocking for add_alert)
         if self._alert_callback:
             try:
-                # Try to get the running event loop
-                try:
-                    loop = asyncio.get_running_loop()
-                    # Schedule task in the running event loop
-                    loop.create_task(self._alert_callback(alert))
-                except RuntimeError:
-                    # No running event loop, try using run_in_executor
-                    import threading
-                    def run_callback():
-                        try:
+                if asyncio.iscoroutinefunction(self._alert_callback):
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(self._alert_callback(alert))
+                    except RuntimeError:
+                        import threading
+
+                        def run_async_callback():
                             new_loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(new_loop)
-                            if asyncio.iscoroutinefunction(self._alert_callback):
+                            try:
+                                asyncio.set_event_loop(new_loop)
                                 new_loop.run_until_complete(self._alert_callback(alert))
-                            else:
-                                self._alert_callback(alert)
-                            new_loop.close()
-                        except Exception as e:
-                            print(f"Error in alert callback thread: {e}")
-                    thread = threading.Thread(target=run_callback, daemon=True)
-                    thread.start()
+                            except Exception as e:
+                                print(f"Error in alert callback thread: {e}")
+                            finally:
+                                new_loop.close()
+
+                        threading.Thread(target=run_async_callback, daemon=True).start()
+                else:
+                    self._alert_callback(alert)
             except Exception as e:
                 print(f"Error scheduling alert callback: {e}")
 

@@ -305,7 +305,46 @@ fastapi:
   log_level: "info"
 
 websocket:
-  ping_interval: 30      # WebSocket ping interval (seconds)
-  ping_timeout: 10       # WebSocket ping timeout (seconds)
-  max_connections: 10    # Maximum simultaneous WebSocket connections
-  broadcast_interval: 5  # State broadcast interval (seconds)
+  client_ping_interval_sec: 30  # Browser ping interval (seconds)
+  ping_timeout_sec: 10          # WebSocket ping timeout (seconds)
+  max_connections: 10           # Maximum simultaneous WebSocket connections
+  default_channels:
+    - sensors
+    - connectivity
+    - alerts
+    - ros2
+    - ros2_control
+    - rosbag
+    - time
+  legacy_state_update:
+    enabled: true       # Short-term compatibility for old WebSocket clients
+    interval_sec: 5
+  channels:
+    connectivity:
+      enabled: true
+      interval_sec: 0.5
+      cache_ttl_sec: 0.0
+    sensors:
+      enabled: true
+      interval_sec: 0.5
+      cache_ttl_sec: 0.2
+    alerts:
+      enabled: true
+      interval_sec: 0.0
+      cache_ttl_sec: 0.0
+    ros2:
+      enabled: true
+      interval_sec: 10.0
+      cache_ttl_sec: 5.0
+    ros2_control:
+      enabled: true
+      interval_sec: 1.0
+      cache_ttl_sec: 3.0
+    rosbag:
+      enabled: true
+      interval_sec: 5.0
+      cache_ttl_sec: 2.0
+    time:
+      enabled: true
+      interval_sec: 1.0
+      cache_ttl_sec: 1.0

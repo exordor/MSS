@@ -4,12 +4,14 @@
  */
 
 // Configuration
+const WS_CONFIG = window.__WEBSOCKET_CONFIG__ || {};
 const CONFIG = {
     chartUpdateInterval: 1000,
     maxRetries: 3,
     retryDelay: 5000,
     wsReconnectDelay: 1000,
     wsMaxReconnectDelay: 30000,
+    wsPingInterval: Math.max(1, Number(WS_CONFIG.client_ping_interval_sec || 30)) * 1000,
 };
 
 // State
@@ -26,6 +28,7 @@ let latestState = {
     ros2_control: null,
     rosbag: null,
     alerts: [],
+    time: null,
 };
 
 // Colors
@@ -73,7 +76,7 @@ class WSConnection {
                 if (this.ws?.readyState === WebSocket.OPEN) {
                     this.ws.send('ping');
                 }
-            }, 30000);
+            }, CONFIG.wsPingInterval);
         };
 
         this.ws.onclose = (event) => {
@@ -181,6 +184,7 @@ function handleFullState(data, timestamp) {
     if (data.ros2_control) latestState.ros2_control = data.ros2_control;
     if (data.rosbag) latestState.rosbag = data.rosbag;
     if (data.alerts) latestState.alerts = data.alerts;
+    if (data.time) latestState.time = data.time;
 
     // Update UI components - IMPORTANT: update ROS2 FIRST, then sensors
     // This ensures ros2NodesCache and ros2TopicsCache are populated before sensor display
@@ -188,6 +192,7 @@ function handleFullState(data, timestamp) {
     if (typeof updateSensorsDisplay === 'function') updateSensorsDisplay(data.sensors);
     if (typeof updateRosbagDisplay === 'function') updateRosbagDisplay(data.rosbag);
     if (typeof updateAlertsDisplay === 'function') updateAlertsDisplay(data.alerts);
+    if (data.time && typeof updateTimeDisplay === 'function') updateTimeDisplay(data.time);
 
     if (data.sensors && hasSensorUI()) {
         markInitialDataUpdated();
@@ -198,16 +203,25 @@ function handleFullState(data, timestamp) {
 }
 
 function handleStateUpdate(data, timestamp) {
-    // Update ROS2 data FIRST, then sensors (so caches are populated)
+    // state_update carries a diff (only changed fields), so we must MERGE
+    // into latestState instead of replacing — otherwise unchanged sensors vanish.
     if (data.ros2) {
-        latestState.ros2 = data.ros2;
+        latestState.ros2 = { ...(latestState.ros2 || {}), ...data.ros2 };
         if (typeof updateROS2Display === 'function') {
-            updateROS2Display(data.ros2, data.ros2_control);
+            updateROS2Display(latestState.ros2, data.ros2_control || latestState.ros2_control);
         }
     }
     if (data.sensors) {
-        latestState.sensors = data.sensors;
-        if (typeof updateSensorsDisplay === 'function') updateSensorsDisplay(data.sensors);
+        const prevSensors = latestState.sensors?.sensors || {};
+        const diffSensors = data.sensors.sensors || {};
+        latestState.sensors = {
+            ...(latestState.sensors || {}),
+            ...data.sensors,
+            sensors: { ...prevSensors, ...diffSensors },
+        };
+        if (typeof updateSensorsDisplay === 'function') {
+            updateSensorsDisplay({ ...data.sensors, partial: true });
+        }
     }
     if (data.ros2_control) {
         latestState.ros2_control = data.ros2_control;
@@ -290,10 +304,19 @@ function handleConnectivityUpdate(data, timestamp) {
         if (!latestState.sensors || !latestState.sensors.sensors) {
             latestState.sensors = { sensors: {} };
         }
-        latestState.sensors.sensors = mergeSensorUpdates(latestState.sensors.sensors, data.sensors);
-    }
-    if (typeof updateSensorsDisplay === 'function') {
-        updateSensorsDisplay({ sensors: data.sensors, partial: true });
+        const connectivityOnly = {};
+        Object.entries(data.sensors).forEach(([name, patch]) => {
+            connectivityOnly[name] = {};
+            ['connected', 'status', 'color', 'message'].forEach((field) => {
+                if (Object.prototype.hasOwnProperty.call(patch || {}, field)) {
+                    connectivityOnly[name][field] = patch[field];
+                }
+            });
+        });
+        latestState.sensors.sensors = mergeSensorUpdates(latestState.sensors.sensors, connectivityOnly);
+        if (typeof updateSensorsDisplay === 'function') {
+            updateSensorsDisplay({ sensors: connectivityOnly, partial: true });
+        }
     }
     if (hasSensorUI()) {
         markInitialDataUpdated();

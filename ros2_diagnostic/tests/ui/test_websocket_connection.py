@@ -5,7 +5,7 @@ Playwright tests for WebSocket connection
 Tests WebSocket functionality from the browser perspective:
 - WebSocket connection establishment on page load
 - Receiving full_state message on initial connection
-- Receiving state_update messages periodically
+- Receiving channelized updates and legacy state_update messages periodically
 - Ping/pong heartbeat mechanism
 - WebSocket appearing in browser Network tab
 """
@@ -221,7 +221,17 @@ class TestWebSocketConnection:
             assert 'type' in msg, "Message should have 'type' field"
 
             # Verify known message types
-            assert msg['type'] in ['full_state', 'state_update'], \
+            assert msg['type'] in [
+                'full_state',
+                'state_update',
+                'connectivity_update',
+                'sensors_update',
+                'ros2_update',
+                'ros2_control_update',
+                'rosbag_update',
+                'time_update',
+                'alert',
+            ], \
                 f"Unknown message type: {msg['type']}"
 
     def test_websocket_connection_object_exists(self, ws_page: WebSocketPage):

@@ -125,6 +125,69 @@ CACHE_TTL = monitor_cfg.get("cache_ttl", {})
 CHART_HISTORY = cfg.get("charts", {})
 UI_CONFIG = cfg.get("ui", {})
 
+
+websocket_cfg = cfg.get("websocket", {})
+websocket_channels_cfg = websocket_cfg.get("channels", {})
+
+
+def _websocket_channel_config(
+    name: str,
+    interval_sec: float,
+    cache_ttl_sec: float,
+    enabled: bool = True,
+) -> dict:
+    channel_cfg = websocket_channels_cfg.get(name, {})
+    return {
+        "enabled": bool(channel_cfg.get("enabled", enabled)),
+        "interval_sec": float(channel_cfg.get("interval_sec", interval_sec)),
+        "cache_ttl_sec": float(channel_cfg.get("cache_ttl_sec", cache_ttl_sec)),
+    }
+
+
+legacy_state_cfg = websocket_cfg.get("legacy_state_update", {})
+WEBSOCKET_CONFIG = {
+    "max_connections": int(websocket_cfg.get("max_connections", 10)),
+    "client_ping_interval_sec": float(
+        websocket_cfg.get(
+            "client_ping_interval_sec",
+            websocket_cfg.get("ping_interval", 30),
+        )
+    ),
+    "ping_timeout_sec": float(
+        websocket_cfg.get(
+            "ping_timeout_sec",
+            websocket_cfg.get("ping_timeout", 10),
+        )
+    ),
+    "default_channels": list(websocket_cfg.get("default_channels", [
+        "sensors",
+        "connectivity",
+        "alerts",
+        "ros2",
+        "ros2_control",
+        "rosbag",
+        "time",
+    ])),
+    "legacy_state_update": {
+        "enabled": bool(legacy_state_cfg.get("enabled", True)),
+        "interval_sec": float(
+            legacy_state_cfg.get(
+                "interval_sec",
+                websocket_cfg.get("broadcast_interval", 5),
+            )
+        ),
+    },
+    "channels": {
+        "sensors": _websocket_channel_config("sensors", 2.0, 0.5),
+        "connectivity": _websocket_channel_config("connectivity", 0.5, 0.0),
+        "alerts": _websocket_channel_config("alerts", 0.0, 0.0),
+        "ros2": _websocket_channel_config("ros2", 10.0, 5.0),
+        "ros2_control": _websocket_channel_config("ros2_control", 1.0, 3.0),
+        "rosbag": _websocket_channel_config("rosbag", 5.0, 2.0),
+        "time": _websocket_channel_config("time", 1.0, 1.0),
+    },
+}
+
 tools_cfg = cfg.get("tools", {})
 TOOLS_CONFIG_FILES = {
     key: _resolve(value) for key, value in tools_cfg.get("config_files", {}).items()
