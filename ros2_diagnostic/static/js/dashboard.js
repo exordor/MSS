@@ -65,11 +65,8 @@ function initTimeStatus() {
         refreshBtn.addEventListener('click', () => refreshTimeStatus(true));
     }
 
+    // Initial fetch while WS connects
     refreshTimeStatus(false);
-
-    const interval = (typeof TIME_REFRESH_INTERVAL !== 'undefined' ? TIME_REFRESH_INTERVAL : 1000);
-    if (timeStatusTimer) clearInterval(timeStatusTimer);
-    timeStatusTimer = setInterval(() => refreshTimeStatus(false), Math.max(500, interval));
 }
 
 async function refreshTimeStatus(manual = false) {
@@ -117,6 +114,8 @@ function updateTimeDisplay(data) {
 // ==========================================
 // WebSocket Message Handlers
 // ==========================================
+
+// handleTimeUpdate is registered in main.js and calls updateTimeDisplay below.
 
 // ==========================================
 // // Refresh Functions

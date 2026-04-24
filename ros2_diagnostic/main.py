@@ -287,6 +287,7 @@ class Channel(Enum):
     ROS2 = "ros2"            # ROS2 system (10s)
     ROS2_CONTROL = "ros2_control"  # ROS2 control (5s)
     ROSBAG = "rosbag"        # Rosbag (5s)
+    TIME = "time"            # System/PHC time (1s)
 
 
 @dataclass
@@ -320,7 +321,7 @@ class ConnectionManager:
         with self._lock:
             self.connections[websocket] = ConnectionInfo(
                 websocket=websocket,
-                channels=set(channels or [Channel.SENSORS, Channel.CONNECTIVITY, Channel.ALERTS, Channel.ROS2, Channel.ROS2_CONTROL, Channel.ROSBAG]),
+                channels=set(channels or [Channel.SENSORS, Channel.CONNECTIVITY, Channel.ALERTS, Channel.ROS2, Channel.ROS2_CONTROL, Channel.ROSBAG, Channel.TIME]),
                 connected_at=time.time()
             )
 
@@ -1651,6 +1652,11 @@ CHANNEL_CONFIG = {
         "priority": "medium",
         "cache_ttl": 2,
     },
+    Channel.TIME: {
+        "interval": 1,
+        "priority": "medium",
+        "cache_ttl": 1,
+    },
 }
 
 async def background_broadcaster():
@@ -1704,6 +1710,11 @@ async def _collect_channel_data(channel: Channel) -> Dict[str, Any]:
     if channel == Channel.ROSBAG:
         data = await asyncio.to_thread(collect_rosbag_status)
         _cache_set('rosbag:status', data)
+        return data
+    if channel == Channel.TIME:
+        refresh_ms = UI_CONFIG.get("time_refresh_interval", 1000)
+        max_age = max(0.2, float(refresh_ms) / 1000.0)
+        data = await asyncio.to_thread(collect_time_status_cached, max_age)
         return data
     if channel == Channel.ALERTS:
         data = await asyncio.to_thread(collect_active_alerts)

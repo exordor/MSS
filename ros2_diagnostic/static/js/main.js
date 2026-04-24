@@ -307,6 +307,10 @@ function handleRosbagUpdate(data, timestamp) {
     updateLastUpdated();
 }
 
+function handleTimeUpdate(data, timestamp) {
+    if (data && typeof updateTimeDisplay === 'function') updateTimeDisplay(data);
+}
+
 function checkForNewAlertsFromWS(alerts) {
     // Check for new alerts and show notification
     if (!alerts || alerts.length === 0) {
@@ -733,6 +737,7 @@ document.addEventListener('DOMContentLoaded', function() {
     wsConnection.on('ros2_update', handleRos2Update);
     wsConnection.on('ros2_control_update', handleRos2ControlUpdate);
     wsConnection.on('rosbag_update', handleRosbagUpdate);
+    wsConnection.on('time_update', handleTimeUpdate);
 
     // Initial update
     updateLastUpdated();
