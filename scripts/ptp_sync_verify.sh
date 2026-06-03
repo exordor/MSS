@@ -27,6 +27,16 @@ echo "📡 1. Service Status Check"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
+# ptp4l status
+echo -n "ptp4l-client.service:    "
+if systemctl is-active --quiet ptp4l-client.service; then
+    echo -e "${GREEN}✓ Running${NC}"
+    systemctl status ptp4l-client.service --no-pager | grep "Active:" | head -1
+else
+    echo -e "${RED}✗ Not Running${NC}"
+fi
+echo ""
+
 # phc2sys status
 echo -n "phc2sys-client.service:   "
 if systemctl is-active --quiet phc2sys-client.service; then
@@ -215,6 +225,14 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 ISSUES=0
+
+# Check ptp4l
+if ! systemctl is-active --quiet ptp4l-client.service; then
+    echo -e "${RED}✗ ptp4l is not running${NC}"
+    ISSUES=$((ISSUES + 1))
+else
+    echo -e "${GREEN}✓ ptp4l is running${NC}"
+fi
 
 # Check phc2sys
 if ! systemctl is-active --quiet phc2sys-client.service; then

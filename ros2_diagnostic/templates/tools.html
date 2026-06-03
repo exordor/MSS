@@ -4,22 +4,80 @@
 
 {% block content %}
 <div class="tools-container">
-    <!-- Page Header -->
     <div class="page-header">
         <h1><i class="fa-solid fa-screwdriver-wrench"></i> Diagnostic Tools</h1>
-        <p class="page-subtitle">Interactive troubleshooting and verification tools</p>
+        <p class="page-subtitle">PTP verification and focused troubleshooting tools</p>
     </div>
 
-    <!-- Tools Grid -->
     <div class="tools-grid">
-        <!-- Ping Tool -->
-        <div class="tool-card">
+        <div class="tool-card wide ptp-primary-card" id="ptp-sync" tabindex="-1">
             <div class="tool-header">
                 <div class="tool-icon">
-                    <i class="fa-solid fa-signal"></i>
+                    <i class="fa-solid fa-arrows-rotate"></i>
                 </div>
-                <h3>Ping Test</h3>
+                <div>
+                    <h3>PTP Sync Verification</h3>
+                    <p class="tool-description">Go/No-Go verification for experiment time sync.</p>
+                </div>
             </div>
+            <div class="tool-body">
+                <div class="ptp-result-panel" id="ptpSyncVerifyResult">
+                    <div class="ptp-decision-card unknown">
+                        <div class="ptp-decision-content">
+                            <div class="ptp-decision-icon">
+                                <i class="fa-solid fa-circle-question"></i>
+                            </div>
+                            <div>
+                                <div class="ptp-decision-label">Not verified</div>
+                                <h2>PTP sync not checked</h2>
+                                <p>Run verification before deciding whether to continue the experiment.</p>
+                                <div class="ptp-decision-meta">
+                                    <span>Last update: never</span>
+                                    <span>Duration: --</span>
+                                    <span>Exit code: --</span>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="tool-btn" type="button" onclick="runPtpSyncVerify()">
+                            <i class="fa-solid fa-play"></i> Run Verify
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tool-card wide">
+            <div class="tool-header">
+                <div class="tool-icon">
+                    <i class="fa-solid fa-clock"></i>
+                </div>
+                <div>
+                    <h3>PTP Status</h3>
+                    <p class="tool-description">Detailed PTP service, master clock, port, and hardware clock status.</p>
+                </div>
+            </div>
+            <div class="tool-body">
+                <div class="tool-controls">
+                    <button class="tool-btn" onclick="runPtpStatus()">
+                        <i class="fa-solid fa-play"></i> Run Status
+                    </button>
+                </div>
+                <div class="tool-result wide" id="ptpStatusResult">
+                    <span class="result-placeholder">PTP status output will appear here</span>
+                </div>
+            </div>
+        </div>
+
+        <details class="tool-card tool-collapsible">
+            <summary class="tool-summary">
+                <span class="tool-summary-title">
+                    <span class="tool-icon small">
+                        <i class="fa-solid fa-signal"></i>
+                    </span>
+                    Ping Test
+                </span>
+                <i class="fa-solid fa-chevron-down"></i>
+            </summary>
             <div class="tool-body">
                 <p class="tool-description">Test network connectivity to sensors and devices.</p>
                 <div class="tool-controls">
@@ -40,16 +98,18 @@
                     <span class="result-placeholder">Results will appear here</span>
                 </div>
             </div>
-        </div>
+        </details>
 
-        <!-- Config Validator -->
-        <div class="tool-card">
-            <div class="tool-header">
-                <div class="tool-icon">
-                    <i class="fa-solid fa-file-code"></i>
-                </div>
-                <h3>Config Validator</h3>
-            </div>
+        <details class="tool-card tool-collapsible">
+            <summary class="tool-summary">
+                <span class="tool-summary-title">
+                    <span class="tool-icon small">
+                        <i class="fa-solid fa-file-code"></i>
+                    </span>
+                    Config Validator
+                </span>
+                <i class="fa-solid fa-chevron-down"></i>
+            </summary>
             <div class="tool-body">
                 <p class="tool-description">Validate YAML configuration files for syntax and required fields.</p>
                 <div class="tool-controls">
@@ -68,49 +128,7 @@
                     <span class="result-placeholder">Validation results will appear here</span>
                 </div>
             </div>
-        </div>
-
-        <!-- PTP Status -->
-        <div class="tool-card wide">
-            <div class="tool-header">
-                <div class="tool-icon">
-                    <i class="fa-solid fa-clock"></i>
-                </div>
-                <h3>PTP Status</h3>
-            </div>
-            <div class="tool-body">
-                <p class="tool-description">Check PTP service, master clock, port, and hardware clock status.</p>
-                <div class="tool-controls">
-                    <button class="tool-btn" onclick="runPtpStatus()">
-                        <i class="fa-solid fa-play"></i> Run Status
-                    </button>
-                </div>
-                <div class="tool-result wide" id="ptpStatusResult">
-                    <span class="result-placeholder">PTP status output will appear here</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- PTP Sync Verification -->
-        <div class="tool-card wide" id="ptp-sync">
-            <div class="tool-header">
-                <div class="tool-icon">
-                    <i class="fa-solid fa-arrows-rotate"></i>
-                </div>
-                <h3>PTP Sync Verification</h3>
-            </div>
-            <div class="tool-body">
-                <p class="tool-description">Verify phc2sys synchronization and compare PHC vs system clock.</p>
-                <div class="tool-controls">
-                    <button class="tool-btn" onclick="runPtpSyncVerify()">
-                        <i class="fa-solid fa-play"></i> Run Verify
-                    </button>
-                </div>
-                <div class="tool-result wide" id="ptpSyncVerifyResult">
-                    <span class="result-placeholder">PTP sync verification output will appear here</span>
-                </div>
-            </div>
-        </div>
+        </details>
     </div>
 </div>
 {% endblock %}

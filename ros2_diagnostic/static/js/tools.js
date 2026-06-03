@@ -9,6 +9,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     initPingTool();
     initConfigValidator();
+    initPtpSyncFocus();
 });
 
 // ==========================================
@@ -110,6 +111,21 @@ function initConfigValidator() {
     // Nothing to initialize
 }
 
+function initPtpSyncFocus() {
+    const focusPtpSync = () => {
+        if (window.location.hash !== '#ptp-sync') return;
+
+        const section = document.getElementById('ptp-sync');
+        if (!section) return;
+
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        section.focus({ preventScroll: true });
+    };
+
+    focusPtpSync();
+    window.addEventListener('hashchange', focusPtpSync);
+}
+
 async function validateConfig() {
     const select = document.getElementById('configSelect');
     const resultDiv = document.getElementById('configResult');
@@ -167,10 +183,8 @@ function renderScriptResult(resultDiv, data) {
     const sudoText = result.used_sudo ? ' · sudo' : '';
     const truncatedText = result.truncated ? ' · Output truncated' : '';
     const output = result.output || 'No output';
-    const summaryHtml = buildPtpSyncSummary(output, ok);
 
     resultDiv.innerHTML = `
-        ${summaryHtml}
         <div class="script-result-summary ${statusClass}">
             <strong>${ok ? 'Completed' : 'Completed with errors'}</strong>
             <span>(${exitText}${durationText}${sudoText}${truncatedText})</span>
@@ -179,82 +193,198 @@ function renderScriptResult(resultDiv, data) {
     `;
 }
 
-function buildPtpSyncSummary(output, commandOk) {
-    const text = (output || '').toLowerCase();
-    const ptpServiceWarn = /ptp4l[^\n]*(inactive|failed|not running)|active:\s+(inactive|failed)/i.test(output);
-    const phc2sysWarn = /phc2sys[^\n]*(not running|failed)|phc2sys is not running/i.test(output);
-    const phc2sysStatus = getPhc2sysStatus(output);
-    const checks = [
-        {
-            label: 'PTP service',
-            ok: !ptpServiceWarn && /ptp4l[^\n]*active:\s+active|active:\s+active \(running\)|ptp4l.*running/i.test(output),
-            warn: ptpServiceWarn
-        },
-        {
-            label: 'Port state',
-            ok: /port\s*state:\s*[\u2713 ]*slave|portstate\s+slave|ptp port is in slave mode/i.test(output),
-            warn: /port\s*state:\s*(?![\u2713 ]*slave)\S+|ptp port is not in slave mode/i.test(output)
-        },
-        {
-            label: 'Master clock',
-            ok: /gmpresent\s+(true|1)|grandmasteridentity|gmidentity/i.test(output),
-            warn: /gmpresent\s+(false|0)/i.test(output)
-        },
-        {
-            label: 'phc2sys',
-            ok: !phc2sysWarn && /phc2sys[^\n]*(\u2713\s*running|is running|:\s*running)|all checks passed/i.test(output),
-            warn: phc2sysWarn
-        }
-    ];
-
-    const passed = checks.filter(check => check.ok).length;
-    const warnings = checks.filter(check => check.warn).length;
-    const hasAllPassed = /all checks passed|ptp sync is working correctly/i.test(output);
-    const hasErrors = !commandOk || warnings > 0 || /error|failed|cannot read|not supported/i.test(text);
-
-    let state = 'warning';
-    let icon = 'fa-triangle-exclamation';
-    let title = 'PTP sync needs checking';
-    let detail = 'Review the highlighted lines below.';
-
-    if (hasAllPassed || (commandOk && warnings === 0 && passed >= 3)) {
-        state = 'ok';
-        icon = 'fa-circle-check';
-        title = 'PTP sync looks healthy';
-        detail = `${passed}/${checks.length} sync signals detected.`;
-    } else if (hasErrors) {
-        state = 'error';
-        icon = 'fa-circle-xmark';
-        title = 'PTP sync has issues';
-        detail = `${warnings} warning signal(s), ${passed}/${checks.length} healthy signal(s).`;
-    } else if (passed > 0) {
-        detail = `${passed}/${checks.length} sync signals detected.`;
+function renderPtpSyncVerifyResult(resultDiv, data) {
+    if (!data || !data.success || !data.result) {
+        const errorText = data?.error || 'Unknown error';
+        resultDiv.innerHTML = renderPtpVerifyErrorCard(errorText);
+        return;
     }
 
-    const checkHtml = checks.map(check => {
-        const checkState = check.ok ? 'ok' : check.warn ? 'error' : 'unknown';
-        const checkIcon = check.ok ? 'fa-check' : check.warn ? 'fa-xmark' : 'fa-minus';
-        return `
-            <span class="ptp-check ${checkState}">
-                <i class="fa-solid ${checkIcon}"></i>
-                ${escapeHtml(check.label)}
-            </span>
-        `;
-    }).join('');
+    const result = data.result;
+    const output = result.output || 'No output';
+    const model = buildPtpVerifyModel(output, result);
 
+    resultDiv.innerHTML = `
+        ${renderPtpDecisionCard(model)}
+        ${renderPtpStatusCards(model.cards)}
+        ${renderPtpTimeTable(model.timeRows)}
+        ${renderPtpRawOutput(output, result.truncated)}
+    `;
+}
+
+function renderPtpVerifyLoading() {
     return `
-        <div class="ptp-sync-summary ${state}">
-            ${renderPhc2sysFocus(phc2sysStatus)}
-            <div class="ptp-sync-main">
-                <i class="fa-solid ${icon}"></i>
+        <div class="ptp-decision-card running">
+            <div class="ptp-decision-content">
+                <div class="ptp-decision-icon">
+                    <span class="spinner"></span>
+                </div>
                 <div>
-                    <strong>${title}</strong>
-                    <span>${detail}</span>
+                    <div class="ptp-decision-label">Running verification</div>
+                    <h2>Checking PTP sync...</h2>
+                    <p>Reading phc2sys, PTP port state, master clock, and PHC/system time.</p>
                 </div>
             </div>
-            <div class="ptp-checks">${checkHtml}</div>
+            <button class="tool-btn" type="button" disabled>
+                <i class="fa-solid fa-rotate fa-spin"></i> Run Verify
+            </button>
         </div>
     `;
+}
+
+function renderPtpVerifyEmpty() {
+    return `
+        <div class="ptp-decision-card unknown">
+            <div class="ptp-decision-content">
+                <div class="ptp-decision-icon">
+                    <i class="fa-solid fa-circle-question"></i>
+                </div>
+                <div>
+                    <div class="ptp-decision-label">Not verified</div>
+                    <h2>PTP sync not checked</h2>
+                    <p>Run verification before deciding whether to continue the experiment.</p>
+                    <div class="ptp-decision-meta">
+                        <span>Last update: never</span>
+                        <span>Duration: --</span>
+                        <span>Exit code: --</span>
+                    </div>
+                </div>
+            </div>
+            <button class="tool-btn" type="button" onclick="runPtpSyncVerify()">
+                <i class="fa-solid fa-play"></i> Run Verify
+            </button>
+        </div>
+    `;
+}
+
+function renderPtpVerifyErrorCard(errorText) {
+    return `
+        <div class="ptp-decision-card nogo">
+            <div class="ptp-decision-content">
+                <div class="ptp-decision-icon">
+                    <i class="fa-solid fa-circle-xmark"></i>
+                </div>
+                <div>
+                    <div class="ptp-decision-label">Not ready</div>
+                    <h2>No-Go: wait/check TimeMachine, GPS, and PTP services</h2>
+                    <p>${escapeHtml(errorText)}</p>
+                    <div class="ptp-decision-meta">
+                        <span>Last update: ${escapeHtml(formatPtpTimestamp(new Date()))}</span>
+                        <span>Duration: --</span>
+                        <span>Exit code: --</span>
+                    </div>
+                </div>
+            </div>
+            <button class="tool-btn" type="button" onclick="runPtpSyncVerify()">
+                <i class="fa-solid fa-rotate"></i> Run Verify
+            </button>
+        </div>
+    `;
+}
+
+function buildPtpVerifyModel(output, result) {
+    const allPassed = /all checks passed|ptp sync is working correctly/i.test(output);
+    const foundIssues = /found\s+([1-9][0-9]*)\s+issue/i.test(output);
+    const cards = [
+        getPtpServiceCard(output, allPassed),
+        getPtpPortCard(output, allPassed),
+        getPhc2sysCard(output, allPassed),
+        getMasterClockCard(output, allPassed)
+    ];
+
+    const hasBlockingCard = cards.some(card => card.state === 'error');
+    const ready = allPassed || (!foundIssues && !hasBlockingCard && cards.every(card => card.state === 'ok'));
+
+    return {
+        ready,
+        title: ready ? 'PTP sync healthy' : 'Not ready',
+        goText: ready
+            ? 'Go: PTP sync is working correctly'
+            : 'No-Go: wait/check TimeMachine, GPS, and PTP services',
+        detail: ready
+            ? 'The system can continue the experiment with synchronized time.'
+            : 'Do not continue until phc2sys, PTP port state, and master clock are healthy.',
+        lastUpdated: formatPtpTimestamp(new Date()),
+        duration: formatDuration(result.duration_ms),
+        exitCode: result.exit_code !== undefined && result.exit_code !== null ? String(result.exit_code) : 'N/A',
+        cards,
+        timeRows: getPtpTimeRows(output),
+        rawTruncated: !!result.truncated
+    };
+}
+
+function getPtpServiceCard(output, allPassed) {
+    const lines = (output || '').split('\n');
+    const line = lines.find(item => /ptp4l-client\.service:|ptp4l.*service:/i.test(item)) || '';
+    const lower = line.toLowerCase();
+
+    if (/not\s+running|failed|inactive|dead/.test(lower)) {
+        return makePtpCard('PTP service', 'Not running', 'Check ptp4l-client.service', 'error', 'fa-satellite-dish');
+    }
+
+    if (/running|active/.test(lower)) {
+        return makePtpCard('PTP service', 'OK', 'ptp4l-client.service running', 'ok', 'fa-satellite-dish');
+    }
+
+    if (allPassed) {
+        return makePtpCard('PTP service', 'OK', 'Passed verification summary', 'ok', 'fa-satellite-dish');
+    }
+
+    return makePtpCard('PTP service', 'Unknown', 'No ptp4l service line found', 'unknown', 'fa-satellite-dish');
+}
+
+function getPtpPortCard(output, allPassed) {
+    const portLine = findOutputLine(output, /port\s*state:/i);
+    const stateMatch = portLine.match(/port\s*state:\s*(?:\u2713\s*)?([A-Z_]+)/i);
+    const stateValue = stateMatch ? stateMatch[1].toUpperCase() : '';
+
+    if (/ptp port is not in slave mode/i.test(output)) {
+        return makePtpCard('Port state', stateValue || 'Not SLAVE', 'PTP port is not locked as SLAVE', 'error', 'fa-ethernet');
+    }
+
+    if (stateValue === 'SLAVE' || /ptp port is in slave mode/i.test(output) || allPassed) {
+        return makePtpCard('Port state', stateValue || 'SLAVE', 'OK', 'ok', 'fa-ethernet');
+    }
+
+    if (stateValue) {
+        return makePtpCard('Port state', stateValue, 'Expected SLAVE', 'warning', 'fa-ethernet');
+    }
+
+    return makePtpCard('Port state', 'Missing', 'No port state found', 'warning', 'fa-ethernet');
+}
+
+function getPhc2sysCard(output, allPassed) {
+    const phc2sysStatus = getPhc2sysStatus(output);
+
+    if (phc2sysStatus?.state === 'ok' || allPassed) {
+        return makePtpCard('phc2sys', 'Running', 'OK', 'ok', 'fa-clock-rotate-left');
+    }
+
+    if (phc2sysStatus?.state === 'error') {
+        return makePtpCard('phc2sys', 'Not running', 'Start phc2sys-client.service', 'error', 'fa-clock-rotate-left');
+    }
+
+    return makePtpCard('phc2sys', 'Unknown', 'No phc2sys status found', 'unknown', 'fa-clock-rotate-left');
+}
+
+function getMasterClockCard(output, allPassed) {
+    if (/gmpresent\s+(false|0)/i.test(output)) {
+        return makePtpCard('Master clock', 'Missing', 'Check TimeMachine/GPS/PTP master', 'error', 'fa-tower-broadcast');
+    }
+
+    if (/gmpresent\s+(true|1)|grandmasteridentity|gmidentity/i.test(output) || allPassed) {
+        return makePtpCard('Master clock', 'OK', 'Grandmaster detected', 'ok', 'fa-tower-broadcast');
+    }
+
+    return makePtpCard('Master clock', 'Warning', 'Master clock evidence missing', 'warning', 'fa-tower-broadcast');
+}
+
+function makePtpCard(label, value, detail, state, icon) {
+    return { label, value, detail, state, icon };
+}
+
+function findOutputLine(output, pattern) {
+    return (output || '').split('\n').find(line => pattern.test(line)) || '';
 }
 
 function getPhc2sysStatus(output) {
@@ -284,8 +414,6 @@ function getPhc2sysStatus(output) {
             icon: 'fa-circle-check',
             label: 'phc2sys-client.service',
             value: 'Running',
-            hintTitle: 'Offline time reference',
-            hint: 'When phc2sys is Running, the times below are the valid experiment-time reference in no-network environments, not the initial boot time.',
             line
         };
     }
@@ -299,32 +427,134 @@ function getPhc2sysStatus(output) {
     };
 }
 
-function renderPhc2sysFocus(status) {
-    if (!status) return '';
-    const hintHtml = status.hint
+function renderPtpDecisionCard(model) {
+    const stateClass = model.ready ? 'go' : 'nogo';
+    const icon = model.ready ? 'fa-circle-check' : 'fa-circle-xmark';
+    const offlineNote = model.ready
         ? `
-            <div class="phc2sys-time-note">
+            <div class="ptp-offline-note">
                 <i class="fa-solid fa-triangle-exclamation"></i>
                 <div>
-                    <strong>${escapeHtml(status.hintTitle || 'Important time note')}</strong>
-                    <p>${escapeHtml(status.hint)}</p>
+                    <strong>Offline time reference</strong>
+                    <p>In no-network environments, the times below are the valid experiment-time reference, not the initial boot time.</p>
                 </div>
             </div>
         `
         : '';
 
     return `
-        <div class="phc2sys-focus ${status.state}">
-            <div class="phc2sys-focus-row">
-                <div class="phc2sys-focus-label">
-                    <i class="fa-solid ${status.icon}"></i>
-                    <span>${escapeHtml(status.label)}</span>
+        <div class="ptp-decision-card ${stateClass}">
+            <div class="ptp-decision-content">
+                <div class="ptp-decision-icon">
+                    <i class="fa-solid ${icon}"></i>
                 </div>
-                <strong>${escapeHtml(status.value)}</strong>
+                <div>
+                    <div class="ptp-decision-label">${model.title}</div>
+                    <h2>${model.goText}</h2>
+                    <p>${model.detail}</p>
+                    <div class="ptp-decision-meta">
+                        <span>Last update: ${escapeHtml(model.lastUpdated)}</span>
+                        <span>Duration: ${escapeHtml(model.duration)}</span>
+                        <span>Exit code: ${escapeHtml(model.exitCode)}</span>
+                    </div>
+                    ${offlineNote}
+                </div>
             </div>
-            ${hintHtml}
+            <button class="tool-btn" type="button" onclick="runPtpSyncVerify()">
+                <i class="fa-solid fa-rotate"></i> Run Verify
+            </button>
         </div>
     `;
+}
+
+function renderPtpStatusCards(cards) {
+    const cardsHtml = cards.map(card => `
+        <div class="ptp-status-card ${card.state}">
+            <div class="ptp-status-card-top">
+                <span class="ptp-status-card-icon">
+                    <i class="fa-solid ${card.icon}"></i>
+                </span>
+                <span class="ptp-status-state">${escapeHtml(card.state === 'ok' ? 'OK' : card.state.toUpperCase())}</span>
+            </div>
+            <div class="ptp-status-label">${escapeHtml(card.label)}</div>
+            <div class="ptp-status-value">${escapeHtml(card.value)}</div>
+            <div class="ptp-status-detail">${escapeHtml(card.detail)}</div>
+        </div>
+    `).join('');
+
+    return `<div class="ptp-status-grid">${cardsHtml}</div>`;
+}
+
+function renderPtpTimeTable(rows) {
+    const rowsHtml = rows.map(row => `
+        <tr>
+            <th>${escapeHtml(row.label)}</th>
+            <td>${escapeHtml(row.value)}</td>
+        </tr>
+    `).join('');
+
+    return `
+        <div class="ptp-time-panel">
+            <div class="ptp-section-title">
+                <i class="fa-solid fa-clock"></i>
+                Key time comparison
+            </div>
+            <table class="ptp-time-table">
+                <tbody>${rowsHtml}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+function renderPtpRawOutput(output, truncated) {
+    const truncatedText = truncated ? '<span class="ptp-raw-warning">Output truncated</span>' : '';
+
+    return `
+        <details class="ptp-raw-output">
+            <summary>
+                <span><i class="fa-solid fa-file-lines"></i> Details / Raw output</span>
+                ${truncatedText}
+            </summary>
+            <pre class="tool-script-output">${renderScriptOutput(output || 'No output')}</pre>
+        </details>
+    `;
+}
+
+function getPtpTimeRows(output) {
+    const phcTime = matchOutputValue(output, /^PHC Time\s+\((?!UTC\))[^)]+\):\s*(.+)$/im);
+    const systemTime = matchOutputValue(output, /^System Time:\s*(.+)$/im);
+    const diff = matchOutputValue(output, /^PHC\s*-\s*System:\s*(.+)$/im);
+    const interpretation = matchOutputValue(output, /^Inference:\s*(?:\u2713|\u26a0)?\s*(.+)$/im);
+
+    return [
+        { label: 'PHC time', value: phcTime || 'N/A' },
+        { label: 'System time', value: systemTime || 'N/A' },
+        { label: 'PHC-System diff', value: diff || 'N/A' },
+        { label: 'Interpretation', value: interpretation || 'N/A' }
+    ];
+}
+
+function matchOutputValue(output, pattern) {
+    const match = (output || '').match(pattern);
+    return match ? match[1].trim() : '';
+}
+
+function formatDuration(ms) {
+    if (ms === undefined || ms === null) return 'N/A';
+    if (ms < 1000) return `${ms} ms`;
+    return `${(ms / 1000).toFixed(1)} s`;
+}
+
+function formatPtpTimestamp(date) {
+    return date.toLocaleString(undefined, {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
 }
 
 function renderScriptOutput(output) {
@@ -382,13 +612,13 @@ async function runPtpStatus() {
 async function runPtpSyncVerify() {
     const resultDiv = document.getElementById('ptpSyncVerifyResult');
     if (!resultDiv) return;
-    resultDiv.innerHTML = '<span class="loading"><span class="spinner"></span> Running PTP sync verification...</span>';
+    resultDiv.innerHTML = renderPtpVerifyLoading();
 
     try {
         const data = await API.tools.ptpSyncVerify();
-        renderScriptResult(resultDiv, data);
+        renderPtpSyncVerifyResult(resultDiv, data);
     } catch (error) {
-        resultDiv.innerHTML = '<span class="script-result-summary error">Error: ' + escapeHtml(error.message) + '</span>';
+        resultDiv.innerHTML = renderPtpVerifyErrorCard(error.message);
     }
 }
 
